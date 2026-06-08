@@ -4,6 +4,9 @@ from datetime import datetime
 import base64
 from io import BytesIO
 
+# 导入PDF生成模块
+from generate_pdf import generate_inspection_pdf, check_font_available
+
 # 页面配置
 st.set_page_config(
     page_title="外贸验货AI Agent - MVP",
@@ -290,15 +293,38 @@ with col_btn2:
             st.markdown("---")
             st.subheader("📥 导出报告")
             
+            # 检查字体是否可用
+            font_available = check_font_available()
+            
             col_pdf1, col_pdf2 = st.columns(2)
             with col_pdf1:
-                if st.button("📄 导出为PDF", use_container_width=True):
-                    st.info("🚧 PDF导出功能开发中...")
-                    st.info("💡 当前可右键打印页面保存为PDF（Ctrl+P）")
+                if st.button("📄 预览报告（HTML）", use_container_width=True):
+                    st.success("✅ 报告已生成！")
+                    st.info("💡 使用浏览器打印功能保存为PDF：Ctrl+P 或 Cmd+P")
             
             with col_pdf2:
-                if st.button("📧 发送至邮箱", use_container_width=True):
-                    st.info("🚧 邮件发送功能开发中...")
+                # 生成PDF下载按钮
+                try:
+                    pdf_buffer = generate_inspection_pdf(report_data, uploaded_files)
+                    
+                    # 下载文件名
+                    pdf_filename = f"验货报告_{report_data['product_name']}_{report_data['report_id']}.pdf"
+                    
+                    st.download_button(
+                        label="📥 下载PDF报告",
+                        data=pdf_buffer,
+                        file_name=pdf_filename,
+                        mime="application/pdf",
+                        use_container_width=True,
+                        key="download_pdf"
+                    )
+                    
+                    if not font_available:
+                        st.warning("⚠️ 未检测到中文字体，PDF可能显示为英文。请联系管理员添加字体文件。")
+                
+                except Exception as e:
+                    st.error(f"❌ PDF生成失败：{str(e)}")
+                    st.info("💡 临时方案：使用浏览器打印功能（Ctrl+P）保存为PDF")
             
             # ROI展示（本次验货）
             st.markdown("---")
