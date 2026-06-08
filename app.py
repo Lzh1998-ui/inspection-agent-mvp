@@ -1,4 +1,5 @@
 import streamlit as st
+import os
 
 # 页面配置
 st.set_page_config(
@@ -7,11 +8,17 @@ st.set_page_config(
     layout="wide"
 )
 
+# ===== 新增：初始化免费次数 =====
+if "free_quota" not in st.session_state:
+    st.session_state["free_quota"] = 5  # 5次免费体验
+if "user_logged_in" not in st.session_state:
+    st.session_state["user_logged_in"] = False
+
 # 标题
 st.title("📦 外贸验货AI Agent - MVP")
 st.markdown("---")
 
-# 侧边栏
+# ===== 新增：简化登录（侧边栏）=====
 with st.sidebar:
     st.header("关于")
     st.info(
@@ -20,41 +27,102 @@ with st.sidebar:
     )
     st.markdown("---")
     
-    # API Key 配置（用户自己输入）
-    st.subheader("🔑 API配置")
+    # ===== 简化登录：只需手机号 =====
+    if not st.session_state["user_logged_in"]:
+        st.subheader("🔐 快速登录")
+        phone = st.text_input("手机号", placeholder="13800000000")
+        
+        col_login1, col_login2 = st.columns([2, 1])
+        with col_login1:
+            code = st.text_input("验证码", placeholder="4位数字")
+        with col_login2:
+            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button("获取验证码", use_container_width=True):
+                if phone:
+                    st.success("验证码已发送")  # TODO: 实际调用短信API
+                else:
+                    st.error("请输入手机号")
+        
+        if st.button("立即登录", type="primary"):
+            if phone and code:
+                st.session_state["user_logged_in"] = True
+                st.session_state["phone"] = phone
+                st.rerun()
+        
+        # 临时：直接跳过登录测试
+        if st.button("跳过登录（测试用）"):
+            st.session_state["user_logged_in"] = True
+            st.session_state["phone"] = "13800000000"
+            st.rerun()
+    else:
+        # 已登录显示用户信息
+        st.success(f"✅ 已登录：{st.session_state.get('phone', '用户')}")
+        st.info(f"🎁 免费剩余次数：{st.session_state['free_quota']} 次")
+        if st.button("退出登录"):
+            st.session_state["user_logged_in"] = False
+            st.rerun()
+    
+    st.markdown("---")
+    
+    # API Key 配置（可选，免费次数用完才需要）
+    st.subheader("🔑 API配置（可选）")
     api_key = st.text_input(
         "OpenAI API Key",
         type="password",
-        help="从 https://platform.openai.com/api-keys 获取"
+        help="免费次数用完后需要填写自己的API Key"
     )
     
     if api_key:
         st.success("✅ API Key已设置")
-        # 存储到session_state
         st.session_state["openai_api_key"] = api_key
     else:
-        st.warning("⚠️ 请输入OpenAI API Key")
-        # 尝试从secrets读取（本地开发用）
-        try:
-            st.session_state["openai_api_key"] = st.secrets["OPENAI_API_KEY"]
-            st.success("✅ 已从secrets读取API Key（本地开发模式）")
-        except:
-            pass
+        st.info("💡 免费次数用完后需填写")
     
     st.markdown("---")
-    st.caption("版本：0.1.0 (MVP)")
-    st.caption("更新时间：2026-06-07")
+    st.caption("版本：0.1.1 (MVP)")
+    st.caption("更新时间：2026-06-08")
 
 # 主界面
 col1, col2 = st.columns([1, 1])
 
 with col1:
     st.subheader("1️⃣ 上传产品照片")
+    
+    # ===== 新增：拍照指南 =====
+    with st.expander("📸 拍照指南（点击展开）", expanded=True):
+        col_guide1, col_guide2 = st.columns(2)
+        
+        with col_guide1:
+            st.markdown("**✅ 正确示范**")
+            # 检查示例图片是否存在
+            correct_img_path = os.path.join(os.path.dirname(__file__), "example_images", "correct.jpg")
+            if os.path.exists(correct_img_path):
+                st.image(correct_img_path, caption="光线充足、45°角、清晰", use_column_width=True)
+            else:
+                st.info("✅ 光线充足\n✅ 45°角拍摄\n✅ 缺陷细节清晰")
+        
+        with col_guide2:
+            st.markdown("**❌ 错误示范**")
+            wrong_img_path = os.path.join(os.path.dirname(__file__), "example_images", "wrong.jpg")
+            if os.path.exists(wrong_img_path):
+                st.image(wrong_img_path, caption="光线暗、距离远、模糊", use_column_width=True)
+            else:
+                st.error("❌ 光线太暗\n❌ 距离太远\n❌ 模糊不清")
+        
+        st.markdown("---")
+        st.markdown(""""
+        **💡 拍照小贴士**
+        - 每次只拍1个产品
+        - 缺陷细节要清晰对焦
+        - 整体+局部各拍1张
+        - 建议上传3-10张不同角度
+        """)
+    
+    # 原有的上传组件
     uploaded_files = st.file_uploader(
         "选择产品照片（3-10张，不同角度）",
         type=['jpg', 'jpeg', 'png'],
-        accept_multiple_files=True,
-        help="建议上传：正面、背面、侧面、细节、包装等角度"
+        accept_multiple_files=True
     )
     
     # 显示上传的图片预览
