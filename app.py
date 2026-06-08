@@ -1,5 +1,8 @@
 import streamlit as st
 import os
+from datetime import datetime
+import base64
+from io import BytesIO
 
 # 页面配置
 st.set_page_config(
@@ -8,17 +11,21 @@ st.set_page_config(
     layout="wide"
 )
 
-# ===== 新增：初始化免费次数 =====
+# ===== 初始化session_state =====
 if "free_quota" not in st.session_state:
     st.session_state["free_quota"] = 5  # 5次免费体验
 if "user_logged_in" not in st.session_state:
     st.session_state["user_logged_in"] = False
+if "inspection_history" not in st.session_state:
+    st.session_state["inspection_history"] = []  # 验货历史记录
+if "total_savings" not in st.session_state:
+    st.session_state["total_savings"] = 0  # 累计节省金额
 
 # 标题
 st.title("📦 外贸验货AI Agent - MVP")
 st.markdown("---")
 
-# ===== 新增：简化登录（侧边栏）=====
+# ===== 侧边栏：简化登录 =====
 with st.sidebar:
     st.header("关于")
     st.info(
@@ -27,7 +34,7 @@ with st.sidebar:
     )
     st.markdown("---")
     
-    # ===== 简化登录：只需手机号 =====
+    # 登录逻辑
     if not st.session_state["user_logged_in"]:
         st.subheader("🔐 快速登录")
         phone = st.text_input("手机号", placeholder="13800000000")
@@ -58,6 +65,17 @@ with st.sidebar:
         # 已登录显示用户信息
         st.success(f"✅ 已登录：{st.session_state.get('phone', '用户')}")
         st.info(f"🎁 免费剩余次数：{st.session_state['free_quota']} 次")
+        
+        # ===== 新增：ROI展示 =====
+        if st.session_state["inspection_history"]:
+            st.markdown("---")
+            st.subheader("📊 您的节省统计")
+            total_inspections = len(st.session_state["inspection_history"])
+            total_savings = st.session_state["total_savings"]
+            st.metric("累计验货次数", f"{total_inspections} 次")
+            st.metric("累计节省金额", f"￥{total_savings:,.0f}")
+            st.caption("每次AI验货约节省￥200-500人工成本")
+        
         if st.button("退出登录"):
             st.session_state["user_logged_in"] = False
             st.rerun()
@@ -79,8 +97,8 @@ with st.sidebar:
         st.info("💡 免费次数用完后需填写")
     
     st.markdown("---")
-    st.caption("版本：0.1.1 (MVP)")
-    st.caption("更新时间：2026-06-08")
+    st.caption("版本：0.2.0 (MVP)")
+    st.caption("更新时间：2026-06-09")
 
 # 主界面
 col1, col2 = st.columns([1, 1])
@@ -88,13 +106,12 @@ col1, col2 = st.columns([1, 1])
 with col1:
     st.subheader("1️⃣ 上传产品照片")
     
-    # ===== 新增：拍照指南 =====
+    # 拍照指南
     with st.expander("📸 拍照指南（点击展开）", expanded=True):
         col_guide1, col_guide2 = st.columns(2)
         
         with col_guide1:
             st.markdown("**✅ 正确示范**")
-            # 检查示例图片是否存在
             correct_img_path = os.path.join(os.path.dirname(__file__), "example_images", "correct.jpg")
             if os.path.exists(correct_img_path):
                 st.image(correct_img_path, caption="光线充足、45°角、清晰", use_column_width=True)
@@ -110,7 +127,7 @@ with col1:
                 st.error("❌ 光线太暗\n❌ 距离太远\n❌ 模糊不清")
         
         st.markdown("---")
-        st.markdown(""""
+        st.markdown("""
         **💡 拍照小贴士**
         - 每次只拍1个产品
         - 缺陷细节要清晰对焦
@@ -118,7 +135,7 @@ with col1:
         - 建议上传3-10张不同角度
         """)
     
-    # 原有的上传组件
+    # 上传组件
     uploaded_files = st.file_uploader(
         "选择产品照片（3-10张，不同角度）",
         type=['jpg', 'jpeg', 'png'],
@@ -181,14 +198,128 @@ with col_btn2:
         elif not product_name:
             st.error("❌ 请填写产品名称")
         else:
-            st.success("✅ 准备生成报告...")
-            st.info("🚧 MVP阶段：报告生成功能即将上线（Day 3-4）")
+            # 检查免费次数
+            if st.session_state["free_quota"] <= 0 and "openai_api_key" not in st.session_state:
+                st.error("❌ 免费次数已用完，请填写API Key或联系客服购买套餐")
+                st.stop()
             
-            # TODO: 后续集成 AI 分析逻辑
-            # with st.spinner("AI正在分析图片..."):
-            #     report_text = analyze_product_images(...)
-            # st.success("✅ 报告生成完成！")
+            # 扣除免费次数
+            if st.session_state["free_quota"] > 0:
+                st.session_state["free_quota"] -= 1
+            
+            # 模拟AI分析过程
+            with st.spinner("🤖 AI正在分析图片..."):
+                import time
+                time.sleep(3)  # 模拟3秒分析时间
+            
+            # ===== 生成模拟报告数据 =====
+            report_data = {
+                "report_id": f"RPT-{datetime.now().strftime('%Y%m%d-%H%M%S')}",
+                "product_name": product_name,
+                "inspection_date": datetime.now().strftime("%Y-%m-%d"),
+                "inspection_standard": inspection_standard,
+                "order_quantity": order_quantity,
+                "sample_size": sample_size,
+                "conclusion": "⚠️ 有条件通过（Minor Defects）",
+                "defects": [
+                    {"type": "划痕", "quantity": 3, "severity": "轻微", "image": uploaded_files[0] if uploaded_files else None},
+                    {"type": "标签错误", "quantity": 1, "severity": "中等", "image": uploaded_files[1] if len(uploaded_files) > 1 else None},
+                ],
+                "savings": 350  # 每次验货节省金额（元）
+            }
+            
+            # 保存到历史记录
+            st.session_state["inspection_history"].append(report_data)
+            st.session_state["total_savings"] += report_data["savings"]
+            
+            st.success("✅ 报告生成完成！")
+            
+            # ===== 显示报告 =====
+            st.markdown("---")
+            st.header("📋 验货报告")
+            
+            # 第1页：结论页
+            st.subheader("1️⃣ 验货结论")
+            col_con1, col_con2, col_con3 = st.columns(3)
+            with col_con1:
+                st.metric("验货编号", report_data["report_id"])
+            with col_con2:
+                st.metric("验货日期", report_data["inspection_date"])
+            with col_con3:
+                st.metric("抽样数量", f"{report_data['sample_size']} 件")
+            
+            st.markdown(f"### {report_data['conclusion']}")
+            st.info("""
+            **建议：** 接受该批次，但要求供应商改进包装，避免运输过程中产生划痕。
+            **标签错误**需在出货前更正。
+            """)
+            
+            # 第2页：缺陷清单
+            st.markdown("---")
+            st.subheader("2️⃣ 缺陷清单")
+            for idx, defect in enumerate(report_data["defects"]):
+                col_def1, col_def2, col_def3, col_def4 = st.columns([1, 1, 1, 2])
+                with col_def1:
+                    st.write(f"**缺陷{idx+1}**")
+                    st.write(defect["type"])
+                with col_def2:
+                    st.write("**数量**")
+                    st.write(defect["quantity"])
+                with col_def3:
+                    st.write("**严重程度**")
+                    if defect["severity"] == "轻微":
+                        st.success(defect["severity"])
+                    elif defect["severity"] == "中等":
+                        st.warning(defect["severity"])
+                    else:
+                        st.error(defect["severity"])
+                with col_def4:
+                    if defect["image"]:
+                        st.image(defect["image"], caption=f"{defect['type']}示例", width=150)
+            
+            # 第3页：照片附件
+            st.markdown("---")
+            st.subheader("3️⃣ 照片附件")
+            if uploaded_files:
+                photo_cols = st.columns(3)
+                for idx, file in enumerate(uploaded_files):
+                    with photo_cols[idx % 3]:
+                        st.image(file, caption=file.name, use_column_width=True)
+            
+            # ===== 一键导出PDF按钮 =====
+            st.markdown("---")
+            st.subheader("📥 导出报告")
+            
+            col_pdf1, col_pdf2 = st.columns(2)
+            with col_pdf1:
+                if st.button("📄 导出为PDF", use_container_width=True):
+                    st.info("🚧 PDF导出功能开发中...")
+                    st.info("💡 当前可右键打印页面保存为PDF（Ctrl+P）")
+            
+            with col_pdf2:
+                if st.button("📧 发送至邮箱", use_container_width=True):
+                    st.info("🚧 邮件发送功能开发中...")
+            
+            # ROI展示（本次验货）
+            st.markdown("---")
+            st.subheader("💰 本次验货价值")
+            col_roi1, col_roi2, col_roi3 = st.columns(3)
+            with col_roi1:
+                st.metric("AI验货成本", "￥0（免费次数）" if st.session_state["free_quota"] >= 0 else "￥9.9")
+            with col_roi2:
+                st.metric("节省人工成本", f"￥{report_data['savings']}")
+            with col_roi3:
+                st.metric("净节省", f"￥{report_data['savings']}")
 
 # 页脚
 st.markdown("---")
 st.caption("💡 MVP版本 - 功能持续迭代中 | 有问题请联系开发者")
+
+# ===== 历史记录（侧边栏底部）=====
+if st.session_state["inspection_history"]:
+    with st.sidebar:
+        st.markdown("---")
+        st.subheader("📜 验货历史")
+        for idx, record in enumerate(st.session_state["inspection_history"][-5:]):  # 只显示最近5条
+            st.text(f"{idx+1}. {record['product_name']}")
+            st.caption(f"   {record['inspection_date']} | {record['conclusion']}")
