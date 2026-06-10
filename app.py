@@ -10,13 +10,32 @@ import base64
 # 导入PDF生成模块
 from generate_pdf import generate_inspection_pdf, check_font_available
 
-# 加载OpenAI API Key
-openai.api_key = st.secrets.get("openai", {}).get("api_key", os.getenv("OPENAI_API_KEY"))
+# ===== 配置API客户端 =====
+# 优先使用DeepSeek（便宜），如果没有配置则使用OpenAI
 
-# ===== OpenAI Vision API 调用函数 =====
+def get_ai_client():
+    """获取AI客户端（DeepSeek或OpenAI）"""
+    # 尝试DeepSeek
+    deepseek_key = st.secrets.get("deepseek", {}).get("api_key")
+    if deepseek_key:
+        client = openai.OpenAI(
+            api_key=deepseek_key,
+            base_url="https://api.deepseek.com"
+        )
+        return client, "deepseek-chat"  # DeepSeek V3模型名
+    
+    # 降级到OpenAI
+    openai_key = st.secrets.get("openai", {}).get("api_key", os.getenv("OPENAI_API_KEY"))
+    if openai_key:
+        client = openai.OpenAI(api_key=openai_key)
+        return client, "gpt-4o"
+    
+    raise ValueError("❌ 未配置API Key！请在 .streamlit/secrets.toml 中配置 deepseek 或 openai")
+
+# ===== AI分析函数 =====
 def analyze_product_images(uploaded_files, product_name, inspection_standard):
     """
-    调用 OpenAI Vision API 分析产品图片
+    调用 AI (DeepSeek/OpenAI) Vision API 分析产品图片
     
     Args:
         uploaded_files: Streamlit UploadedFile 列表
@@ -27,6 +46,9 @@ def analyze_product_images(uploaded_files, product_name, inspection_standard):
         dict: 包含 conclusion, defects 的报告数据
     """
     try:
+        # 获取AI客户端和模型
+        client, model_name = get_ai_client()
+        
         # 构建消息内容
         messages = [
             {
@@ -67,9 +89,9 @@ def analyze_product_images(uploaded_files, product_name, inspection_standard):
                 }
             })
         
-        # 调用 OpenAI Vision API
-        response = openai.ChatCompletion.create(
-            model="gpt-4-vision-preview",
+        # 调用 AI Vision API
+        response = client.chat.completions.create(
+            model=model_name,
             messages=messages,
             max_tokens=1000,
             temperature=0.3
