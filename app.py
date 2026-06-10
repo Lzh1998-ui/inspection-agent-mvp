@@ -44,7 +44,7 @@ def get_ai_client():
 # ===== AI分析函数 =====
 def analyze_product_images(uploaded_files, product_name, inspection_standard):
     """
-    调用 AI (DeepSeek/OpenAI) Vision API 分析产品图片
+    调用 AI (通义千问VL/DeepSeek/OpenAI) Vision API 分析产品图片
     
     Args:
         uploaded_files: Streamlit UploadedFile 列表
@@ -227,8 +227,8 @@ with st.sidebar:
         st.info("💡 免费次数用完后需填写")
     
     st.markdown("---")
-    st.caption("版本：0.2.0 (MVP)")
-    st.caption("更新时间：2026-06-09")
+    st.caption("版本：0.3.0 (MVP)")
+    st.caption("更新时间：2026-06-11")
 
 # 主界面
 col1, col2 = st.columns([1, 1])
@@ -405,7 +405,7 @@ with col_btn2:
                     else:
                         st.error(defect["severity"])
                 with col_def4:
-                    if defect["image"]:
+                    if "image" in defect and defect["image"]:
                         st.image(defect["image"], caption=f"{defect['type']}示例", width=150)
             
             # 第3页：照片附件
