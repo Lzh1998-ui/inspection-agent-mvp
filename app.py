@@ -11,26 +11,35 @@ import base64
 from generate_pdf import generate_inspection_pdf, check_font_available
 
 # ===== 配置API客户端 =====
-# 优先使用DeepSeek（便宜），如果没有配置则使用OpenAI
+# 优先级：通义千问VL > DeepSeek > OpenAI
 
 def get_ai_client():
-    """获取AI客户端（DeepSeek或OpenAI）"""
-    # 尝试DeepSeek
+    """获取AI客户端（通义千问/DeepSeek/OpenAI）"""
+    # 1. 优先使用通义千问VL（支持视觉，便宜）
+    qwen_key = st.secrets.get("qwen", {}).get("api_key")
+    if qwen_key:
+        client = openai.OpenAI(
+            api_key=qwen_key,
+            base_url="https://dashscope.aliyuncs.com/compatible-mode/v1"
+        )
+        return client, "qwen-vl-plus"  # 通义千问VL模型（支持图片）
+    
+    # 2. 降级到DeepSeek（便宜，仅文本）
     deepseek_key = st.secrets.get("deepseek", {}).get("api_key")
     if deepseek_key:
         client = openai.OpenAI(
             api_key=deepseek_key,
             base_url="https://api.deepseek.com"
         )
-        return client, "deepseek-chat"  # DeepSeek V3模型名
+        return client, "deepseek-chat"
     
-    # 降级到OpenAI
+    # 3. 降级到OpenAI（贵，但稳定）
     openai_key = st.secrets.get("openai", {}).get("api_key", os.getenv("OPENAI_API_KEY"))
     if openai_key:
         client = openai.OpenAI(api_key=openai_key)
         return client, "gpt-4o"
     
-    raise ValueError("❌ 未配置API Key！请在 .streamlit/secrets.toml 中配置 deepseek 或 openai")
+    raise ValueError("❌ 未配置API Key！请在 .streamlit/secrets.toml 中配置 qwen/deepseek/openai")
 
 # ===== AI分析函数 =====
 def analyze_product_images(uploaded_files, product_name, inspection_standard):
