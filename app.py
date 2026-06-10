@@ -3,9 +3,105 @@ import os
 from datetime import datetime
 import base64
 from io import BytesIO
+import openai
+import json
+import base64
 
 # 导入PDF生成模块
 from generate_pdf import generate_inspection_pdf, check_font_available
+
+# 加载OpenAI API Key
+openai.api_key = st.secrets.get("openai", {}).get("api_key", os.getenv("OPENAI_API_KEY"))
+
+# ===== OpenAI Vision API 调用函数 =====
+def analyze_product_images(uploaded_files, product_name, inspection_standard):
+    """
+    调用 OpenAI Vision API 分析产品图片
+    
+    Args:
+        uploaded_files: Streamlit UploadedFile 列表
+        product_name: 产品名称
+        inspection_standard: 验货标准（如 "AQL 2.5"）
+    
+    Returns:
+        dict: 包含 conclusion, defects 的报告数据
+    """
+    try:
+        # 构建消息内容
+        messages = [
+            {
+                "role": "system",
+                "content": """你是一位专业的外贸验货员。请分析产品图片，识别缺陷类型、数量和严重程度。
+                
+输出格式（严格按JSON）：
+{
+  "conclusion": "验货结论（接受/有条件通过/拒收）",
+  "defects": [
+    {"type": "缺陷类型", "quantity": 数量, "severity": "轻微/中等/严重"}
+  ],
+  "recommendation": "改进建议"
+}
+                """
+            },
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": f"请分析这款产品：{product_name}\n验货标准：{inspection_standard}\n\n请识别图片中的缺陷，输出JSON格式结果。"
+                    }
+                ]
+            }
+        ]
+        
+        # 添加图片到消息
+        for uploaded_file in uploaded_files:
+            # 将图片转换为 base64
+            image_bytes = uploaded_file.getvalue()
+            image_b64 = base64.b64encode(image_bytes).decode('utf-8')
+            
+            messages[1]["content"].append({
+                "type": "image_url",
+                "image_url": {
+                    "url": f"data:image/jpeg;base64,{image_b64}"
+                }
+            })
+        
+        # 调用 OpenAI Vision API
+        response = openai.ChatCompletion.create(
+            model="gpt-4-vision-preview",
+            messages=messages,
+            max_tokens=1000,
+            temperature=0.3
+        )
+        
+        # 解析AI返回的结果
+        ai_response = response.choices[0].message.content
+        
+        # 尝试解析JSON
+        try:
+            result = json.loads(ai_response)
+        except json.JSONDecodeError:
+            # 如果AI返回的不是纯JSON，尝试提取JSON部分
+            import re
+            json_match = re.search(r'\{.*\}', ai_response, re.DOTALL)
+            if json_match:
+                result = json.loads(json_match.group())
+            else:
+                raise ValueError("AI返回格式错误")
+        
+        return result
+    
+    except Exception as e:
+        st.error(f"❌ AI分析失败：{str(e)}")
+        # 返回模拟数据作为降级方案
+        return {
+            "conclusion": "⚠️ AI分析失败，使用模拟数据",
+            "defects": [
+                {"type": "分析失败", "quantity": 0, "severity": "未知"}
+            ],
+            "recommendation": "请检查API Key或网络连接"
+        }
 
 # 页面配置
 st.set_page_config(
@@ -210,12 +306,15 @@ with col_btn2:
             if st.session_state["free_quota"] > 0:
                 st.session_state["free_quota"] -= 1
             
-            # 模拟AI分析过程
+            # 调用真实AI分析
             with st.spinner("🤖 AI正在分析图片..."):
-                import time
-                time.sleep(3)  # 模拟3秒分析时间
+                ai_result = analyze_product_images(
+                    uploaded_files, 
+                    product_name, 
+                    inspection_standard
+                )
             
-            # ===== 生成模拟报告数据 =====
+            # ===== 生成报告数据 =====
             report_data = {
                 "report_id": f"RPT-{datetime.now().strftime('%Y%m%d-%H%M%S')}",
                 "product_name": product_name,
@@ -223,11 +322,9 @@ with col_btn2:
                 "inspection_standard": inspection_standard,
                 "order_quantity": order_quantity,
                 "sample_size": sample_size,
-                "conclusion": "⚠️ 有条件通过（Minor Defects）",
-                "defects": [
-                    {"type": "划痕", "quantity": 3, "severity": "轻微", "image": uploaded_files[0] if uploaded_files else None},
-                    {"type": "标签错误", "quantity": 1, "severity": "中等", "image": uploaded_files[1] if len(uploaded_files) > 1 else None},
-                ],
+                "conclusion": ai_result.get("conclusion", "⚠️ 分析失败"),
+                "defects": ai_result.get("defects", []),
+                "recommendation": ai_result.get("recommendation", ""),
                 "savings": 350  # 每次验货节省金额（元）
             }
             
