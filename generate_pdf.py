@@ -13,7 +13,14 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from io import BytesIO
 import os
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
+
+# ===== 北京时间 =====
+_BJ_TZ = timezone(timedelta(hours=8))
+
+def now_bj():
+    """获取当前北京时间"""
+    return datetime.now(_BJ_TZ)
 
 # ===== 注册中文字体 =====
 def register_chinese_font():
@@ -135,9 +142,20 @@ def generate_inspection_pdf(report_data, uploaded_files):
     conclusion_text = f"验货结论：{report_data.get('conclusion', 'N/A')}"
     story.append(Paragraph(conclusion_text, heading_style))
     
-    suggestion_text = "建议：接受该批次，但要求供应商改进包装，避免运输过程中产生划痕。标签错误需在出货前更正。"
+    # 使用 AI 返回的建议（如果有的话）
+    recommendation = report_data.get('recommendation', '')
+    if recommendation:
+        suggestion_text = f"建议：{recommendation}"
+    else:
+        suggestion_text = "建议：无改进建议"
+    
     if not chinese_font:
-        suggestion_text = "Suggestion: Accept the batch, but require supplier to improve packaging."
+        # 英文版本
+        recommendation_en = report_data.get('recommendation', '')
+        if recommendation_en:
+            suggestion_text = f"Recommendation: {recommendation_en}"
+        else:
+            suggestion_text = "Recommendation: No suggestion available"
     
     story.append(Paragraph(suggestion_text, normal_style))
     story.append(Spacer(1, 1*cm))
@@ -201,9 +219,9 @@ def generate_inspection_pdf(report_data, uploaded_files):
     
     # ===== 页脚 =====
     story.append(Spacer(1, 1*cm))
-    footer_text = f"报告生成时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+    footer_text = f"报告生成时间：{now_bj().strftime('%Y-%m-%d %H:%M:%S')}"
     if not chinese_font:
-        footer_text = f"Report generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        footer_text = f"Report generated: {now_bj().strftime('%Y-%m-%d %H:%M:%S')}"
     
     footer_style = ParagraphStyle(
         'Footer',
@@ -240,7 +258,8 @@ if __name__ == "__main__":
         "defects": [
             {"type": "划痕", "quantity": 3, "severity": "轻微"},
             {"type": "标签错误", "quantity": 1, "severity": "中等"},
-        ]
+        ],
+        "recommendation": "改进包装，避免运输划痕"
     }
     
     pdf_buffer = generate_inspection_pdf(test_data, [])
@@ -249,3 +268,4 @@ if __name__ == "__main__":
         f.write(pdf_buffer.read())
     
     print("测试PDF已生成：test_report.pdf")
+
