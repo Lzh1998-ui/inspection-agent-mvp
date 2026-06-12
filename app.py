@@ -349,7 +349,7 @@ with col_btn2:
             report_data = {
                 "report_id": f"RPT-{datetime.now().strftime('%Y%m%d-%H%M%S')}",
                 "product_name": product_name,
-                "inspection_date": datetime.now().strftime("%Y-%m-%d"),
+                "inspection_date": datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d"),
                 "inspection_standard": inspection_standard,
                 "order_quantity": order_quantity,
                 "sample_size": sample_size,
