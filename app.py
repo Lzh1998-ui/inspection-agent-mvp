@@ -142,10 +142,20 @@ st.set_page_config(
 )
 
 # ===== 初始化session_state =====
+# 次数限制（简单防护，刷新页面会重置）
+if "inspection_count" not in st.session_state:
+    st.session_state["inspection_count"] = 0  # 累计验货次数
+if "inspection_limit" not in st.session_state:
+    st.session_state["inspection_limit"] = 20  # 每次会话限制20次
 if "inspection_history" not in st.session_state:
     st.session_state["inspection_history"] = []  # 验货历史记录
 if "total_savings" not in st.session_state:
     st.session_state["total_savings"] = 0  # 累计节省金额
+
+# ===== 检查是否超过次数限制 =====
+def is_limit_reached():
+    """检查是否达到使用次数限制"""
+    return st.session_state["inspection_count"] >= st.session_state["inspection_limit"]
 
 # 标题
 st.title("📦 外贸验货AI Agent - MVP")
@@ -160,9 +170,22 @@ with st.sidebar:
     )
     st.markdown("---")
     
+    # 使用次数提示
+    remaining = st.session_state["inspection_limit"] - st.session_state["inspection_count"]
+    st.subheader("📊 使用统计")
+    st.metric("已使用次数", f"{st.session_state['inspection_count']} 次")
+    st.metric("剩余次数", f"{remaining} 次")
+    
+    if remaining <= 5:
+        st.warning(f"⚠️ 剩余次数不多，建议配置自己的API Key")
+    
+    st.caption(f"💡 每次会话限制 {st.session_state['inspection_limit']} 次")
+    st.caption("如需更多次数，请联系开发者获取API Key")
+    st.markdown("---")
+    
     # ROI展示
     if st.session_state["inspection_history"]:
-        st.subheader("📊 您的节省统计")
+        st.subheader("💰 您的节省统计")
         total_inspections = len(st.session_state["inspection_history"])
         total_savings = st.session_state["total_savings"]
         st.metric("累计验货次数", f"{total_inspections} 次")
@@ -170,7 +193,7 @@ with st.sidebar:
         st.caption("每次AI验货约节省￥200-500人工成本")
         st.markdown("---")
     
-    st.caption("版本：0.2.1 (MVP)")
+    st.caption("版本：0.2.2 (MVP)")
     st.caption("更新时间：2026-06-13")
 
 # 主界面
@@ -212,7 +235,8 @@ with col1:
     uploaded_files = st.file_uploader(
         "选择产品照片（3-10张，不同角度）",
         type=['jpg', 'jpeg', 'png'],
-        accept_multiple_files=True
+        accept_multiple_files=True,
+        disabled=is_limit_reached()
     )
     
     # 显示上传的图片预览
@@ -228,14 +252,16 @@ with col2:
     product_name = st.text_input(
         "产品名称",
         placeholder="例如：不锈钢保温杯",
-        help="请输入产品的通用名称"
+        help="请输入产品的通用名称",
+        disabled=is_limit_reached()
     )
     
     inspection_standard = st.selectbox(
         "验货标准",
         options=["AQL 1.5", "AQL 2.5", "客户自定义"],
         index=1,
-        help="AQL (Acceptable Quality Limit) 是外贸验货常用标准"
+        help="AQL (Acceptable Quality Limit) 是外贸验货常用标准",
+        disabled=is_limit_reached()
     )
     
     order_quantity = st.number_input(
@@ -243,7 +269,8 @@ with col2:
         min_value=1,
         value=500,
         step=100,
-        help="用于计算抽样数量"
+        help="用于计算抽样数量",
+        disabled=is_limit_reached()
     )
     
     # 抽样数量（简化计算，实际应根据MIL-STD-105E）
@@ -258,19 +285,31 @@ with col2:
 
 # 生成报告按钮
 st.markdown("---")
+
+# 次数限制提示
+if is_limit_reached():
+    st.error("❌ 本次会话已达到使用次数限制（20次）")
+    st.info("💡 刷新页面可重置次数，或联系开发者获取更多次数")
+else:
+    remaining = st.session_state["inspection_limit"] - st.session_state["inspection_count"]
+    st.info(f"📊 您还有 **{remaining}** 次免费使用次数")
+
 col_btn1, col_btn2, col_btn3 = st.columns([1, 2, 1])
 with col_btn2:
     if st.button(
         "🚀 生成验货报告",
         use_container_width=True,
         type="primary",
-        disabled=not (uploaded_files and product_name)
+        disabled=is_limit_reached() or not (uploaded_files and product_name)
     ):
         if not uploaded_files:
             st.error("❌ 请至少上传1张产品照片")
         elif not product_name:
             st.error("❌ 请填写产品名称")
         else:
+            # 增加使用次数
+            st.session_state["inspection_count"] += 1
+            
             # 调用AI分析
             with st.spinner("🤖 AI正在分析图片..."):
                 ai_result = analyze_product_images(
@@ -319,22 +358,26 @@ with col_btn2:
             # 第2页：缺陷清单
             st.markdown("---")
             st.subheader("2️⃣ 缺陷清单")
-            for idx, defect in enumerate(report_data["defects"]):
-                col_def1, col_def2, col_def3 = st.columns([1, 1, 1])
-                with col_def1:
-                    st.write(f"**缺陷{idx+1}**")
-                    st.write(defect["type"])
-                with col_def2:
-                    st.write("**数量**")
-                    st.write(defect["quantity"])
-                with col_def3:
-                    st.write("**严重程度**")
-                    if defect["severity"] == "轻微":
-                        st.success(defect["severity"])
-                    elif defect["severity"] == "中等":
-                        st.warning(defect["severity"])
-                    else:
-                        st.error(defect["severity"])
+            if report_data["defects"]:
+                for idx, defect in enumerate(report_data["defects"]):
+                    col_def1, col_def2, col_def3 = st.columns([1, 1, 1])
+                    with col_def1:
+                        st.write(f"**缺陷{idx+1}**")
+                        st.write(defect.get("type", "未知"))
+                    with col_def2:
+                        st.write("**数量**")
+                        st.write(defect.get("quantity", 0))
+                    with col_def3:
+                        st.write("**严重程度**")
+                        severity = defect.get("severity", "未知")
+                        if severity == "轻微":
+                            st.success(severity)
+                        elif severity == "中等":
+                            st.warning(severity)
+                        else:
+                            st.error(severity)
+            else:
+                st.info("✅ 未发现明显缺陷")
             
             # 第3页：照片附件
             st.markdown("---")
@@ -392,6 +435,11 @@ with col_btn2:
                 st.metric("节省人工成本", f"￥{report_data['savings']}")
             with col_roi3:
                 st.metric("净节省", f"￥{report_data['savings']}")
+            
+            # 剩余次数提示
+            remaining = st.session_state["inspection_limit"] - st.session_state["inspection_count"]
+            if remaining <= 5:
+                st.warning(f"⚠️ 剩余使用次数不多（{remaining}次），请珍惜使用")
 
 # 页脚
 st.markdown("---")
