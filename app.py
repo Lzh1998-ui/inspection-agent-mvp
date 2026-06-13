@@ -44,7 +44,7 @@ def get_ai_client():
 # ===== AI分析函数 =====
 def analyze_product_images(uploaded_files, product_name, inspection_standard):
     """
-    调用 AI (通义千问VL/DeepSeek/OpenAI) Vision API 分析产品图片
+    调用 AI (DeepSeek/OpenAI) Vision API 分析产品图片
     
     Args:
         uploaded_files: Streamlit UploadedFile 列表
@@ -142,10 +142,6 @@ st.set_page_config(
 )
 
 # ===== 初始化session_state =====
-if "free_quota" not in st.session_state:
-    st.session_state["free_quota"] = 5  # 5次免费体验
-if "user_logged_in" not in st.session_state:
-    st.session_state["user_logged_in"] = False
 if "inspection_history" not in st.session_state:
     st.session_state["inspection_history"] = []  # 验货历史记录
 if "total_savings" not in st.session_state:
@@ -155,7 +151,7 @@ if "total_savings" not in st.session_state:
 st.title("📦 外贸验货AI Agent - MVP")
 st.markdown("---")
 
-# ===== 侧边栏：简化登录 =====
+# ===== 侧边栏 =====
 with st.sidebar:
     st.header("关于")
     st.info(
@@ -164,71 +160,18 @@ with st.sidebar:
     )
     st.markdown("---")
     
-    # 登录逻辑
-    if not st.session_state["user_logged_in"]:
-        st.subheader("🔐 快速登录")
-        phone = st.text_input("手机号", placeholder="13800000000")
-        
-        col_login1, col_login2 = st.columns([2, 1])
-        with col_login1:
-            code = st.text_input("验证码", placeholder="4位数字")
-        with col_login2:
-            st.markdown("<br>", unsafe_allow_html=True)
-            if st.button("获取验证码", use_container_width=True):
-                if phone:
-                    st.success("验证码已发送")  # TODO: 实际调用短信API
-                else:
-                    st.error("请输入手机号")
-        
-        if st.button("立即登录", type="primary"):
-            if phone and code:
-                st.session_state["user_logged_in"] = True
-                st.session_state["phone"] = phone
-                st.rerun()
-        
-        # 临时：直接跳过登录测试
-        if st.button("跳过登录（测试用）"):
-            st.session_state["user_logged_in"] = True
-            st.session_state["phone"] = "13800000000"
-            st.rerun()
-    else:
-        # 已登录显示用户信息
-        st.success(f"✅ 已登录：{st.session_state.get('phone', '用户')}")
-        st.info(f"🎁 免费剩余次数：{st.session_state['free_quota']} 次")
-        
-        # ===== 新增：ROI展示 =====
-        if st.session_state["inspection_history"]:
-            st.markdown("---")
-            st.subheader("📊 您的节省统计")
-            total_inspections = len(st.session_state["inspection_history"])
-            total_savings = st.session_state["total_savings"]
-            st.metric("累计验货次数", f"{total_inspections} 次")
-            st.metric("累计节省金额", f"￥{total_savings:,.0f}")
-            st.caption("每次AI验货约节省￥200-500人工成本")
-        
-        if st.button("退出登录"):
-            st.session_state["user_logged_in"] = False
-            st.rerun()
+    # ROI展示
+    if st.session_state["inspection_history"]:
+        st.subheader("📊 您的节省统计")
+        total_inspections = len(st.session_state["inspection_history"])
+        total_savings = st.session_state["total_savings"]
+        st.metric("累计验货次数", f"{total_inspections} 次")
+        st.metric("累计节省金额", f"￥{total_savings:,.0f}")
+        st.caption("每次AI验货约节省￥200-500人工成本")
+        st.markdown("---")
     
-    st.markdown("---")
-    
-    # API Key 配置（可选，免费次数用完才需要）
-    st.subheader("🔑 API配置（可选）")
-    api_key = st.text_input(
-        "OpenAI API Key",
-        type="password",
-        help="免费次数用完后需要填写自己的API Key"
-    )
-    
-    if api_key:
-        st.success("✅ API Key已设置")
-        st.session_state["openai_api_key"] = api_key
-    else:
-        st.info("💡 免费次数用完后需填写")
-    
-    st.markdown("---")
-    st.caption("版本：0.3.0 (MVP)")
-    st.caption("更新时间：2026-06-11")
+    st.caption("版本：0.2.1 (MVP)")
+    st.caption("更新时间：2026-06-13")
 
 # 主界面
 col1, col2 = st.columns([1, 1])
@@ -328,16 +271,7 @@ with col_btn2:
         elif not product_name:
             st.error("❌ 请填写产品名称")
         else:
-            # 检查免费次数
-            if st.session_state["free_quota"] <= 0 and "openai_api_key" not in st.session_state:
-                st.error("❌ 免费次数已用完，请填写API Key或联系客服购买套餐")
-                st.stop()
-            
-            # 扣除免费次数
-            if st.session_state["free_quota"] > 0:
-                st.session_state["free_quota"] -= 1
-            
-            # 调用真实AI分析
+            # 调用AI分析
             with st.spinner("🤖 AI正在分析图片..."):
                 ai_result = analyze_product_images(
                     uploaded_files, 
@@ -380,16 +314,13 @@ with col_btn2:
                 st.metric("抽样数量", f"{report_data['sample_size']} 件")
             
             st.markdown(f"### {report_data['conclusion']}")
-            st.info("""
-            **建议：** 接受该批次，但要求供应商改进包装，避免运输过程中产生划痕。
-            **标签错误**需在出货前更正。
-            """)
+            st.info(f"**建议：** {report_data['recommendation']}")
             
             # 第2页：缺陷清单
             st.markdown("---")
             st.subheader("2️⃣ 缺陷清单")
             for idx, defect in enumerate(report_data["defects"]):
-                col_def1, col_def2, col_def3, col_def4 = st.columns([1, 1, 1, 2])
+                col_def1, col_def2, col_def3 = st.columns([1, 1, 1])
                 with col_def1:
                     st.write(f"**缺陷{idx+1}**")
                     st.write(defect["type"])
@@ -404,9 +335,6 @@ with col_btn2:
                         st.warning(defect["severity"])
                     else:
                         st.error(defect["severity"])
-                with col_def4:
-                    if "image" in defect and defect["image"]:
-                        st.image(defect["image"], caption=f"{defect['type']}示例", width=150)
             
             # 第3页：照片附件
             st.markdown("---")
@@ -459,7 +387,7 @@ with col_btn2:
             st.subheader("💰 本次验货价值")
             col_roi1, col_roi2, col_roi3 = st.columns(3)
             with col_roi1:
-                st.metric("AI验货成本", "￥0（免费次数）" if st.session_state["free_quota"] >= 0 else "￥9.9")
+                st.metric("AI验货成本", "￥0（MVP免费）")
             with col_roi2:
                 st.metric("节省人工成本", f"￥{report_data['savings']}")
             with col_roi3:
