@@ -76,7 +76,7 @@ def analyze_product_images(uploaded_files, product_name, inspection_standard):
   "conclusion": "合格/不合格/有条件接受",
   "defects": [
     {
-      "type": "缺陷类型（如：划痕/变形/色差/功能异常/包装破损）",
+      "type": "划痕/变形/色差/功能异常/包装破损等",
       "quantity": 数字（必须是整数，如3，不能写"若干"或"少量"）,
       "severity": "严重/中等/轻微",
       "description": "详细描述缺陷位置、大小、程度（50字以内）",
