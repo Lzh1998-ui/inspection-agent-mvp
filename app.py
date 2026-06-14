@@ -72,7 +72,7 @@ def analyze_product_images(uploaded_files, product_name, inspection_standard):
 {
   "conclusion": "验货结论（接受/有条件通过/拒收）",
   "defects": [
-    {"type": "缺陷类型", "quantity": 数量, "severity": "轻微/中等/严重"}
+    {"type": "缺陷类型", "quantity": 数量, "severity": "轻微/中等/严重"，"description": "缺陷描述", "image": "图片位置或空字符串"}
   ],
   "recommendation": "改进建议"
 }
