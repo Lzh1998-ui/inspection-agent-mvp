@@ -225,7 +225,7 @@ def show_user_info():
 if "inspection_count" not in st.session_state:
     st.session_state["inspection_count"] = 0
 if "inspection_limit" not in st.session_state:
-    st.session_state["inspection_limit"] = 20
+    st.session_state["inspection_limit"] = 3
 if "inspection_history" not in st.session_state:
     st.session_state["inspection_history"] = []
 if "total_savings" not in st.session_state:
@@ -252,7 +252,7 @@ if not st.session_state["user"] and not st.session_state["skip_login"]:
         st.subheader("💡 关于本应用")
         st.info(
             "上传产品照片 → AI自动分析缺陷 → 生成专业验货报告\n\n"
-            "**免费体验：** 每用户20次/天\n\n"
+            "**免费体验：** 每用户3次/天\n\n"
             "**适用场景：**\n"
             "- 外贸验货员\n"
             "- 质检部门\n"
@@ -288,7 +288,7 @@ with st.sidebar:
     st.metric("已使用次数", f"{get_inspection_count()} 次")
     st.metric("剩余次数", f"{remaining} 次")
     
-    if remaining <= 5:
+    if remaining <=2:
         st.warning(f"⚠️ 剩余次数不多")
     
     st.caption(f"💡 每用户 {get_inspection_limit()} 次")
