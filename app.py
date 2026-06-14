@@ -99,7 +99,7 @@ def analyze_product_images(uploaded_files, product_name, inspection_standard):
 ⚠️ 不要编造图片中不存在的缺陷
 ⚠️ 如果未发现缺陷，defects数组设为空 []
 """
-                """
+    
             },
             {
                 "role": "user",
