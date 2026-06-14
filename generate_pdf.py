@@ -256,8 +256,8 @@ if __name__ == "__main__":
         "sample_size": 50,
         "conclusion": "⚠️ 有条件通过（Minor Defects）",
         "defects": [
-            {"type": "划痕", "quantity": 3, "severity": "轻微"},
-            {"type": "标签错误", "quantity": 1, "severity": "中等"},
+            {"type": "划痕", "quantity": 3, "severity": "轻微","description": "表面有轻微划痕", "image": ""},
+            {"type": "标签错误", "quantity": 1, "severity": "中等","description": "产品标签信息错误", "image": ""},
         ],
         "recommendation": "改进包装，避免运输划痕"
     }
