@@ -280,6 +280,7 @@ def analyze_product_images(uploaded_files, product_name, inspection_standard):
         
         # 4. 添加图片
         for uploaded_file in uploaded_files:
+            # 图片按上传顺序编号，AI 在分析时引用 "图1/图2/图3" 对应缺陷
             try:
                 image_bytes = uploaded_file.getvalue()
                 image_b64 = base64.b64encode(image_bytes).decode('utf-8')
@@ -609,7 +610,13 @@ with col1:
             - 建议上传3-{MAX_FILES}张不同角度
             - 单张图片不超过 {MAX_FILE_SIZE_MB}MB
             """)
-        
+            st.markdown("""
+            **上传建议：**
+            - 按顺序上传：整体外观 → 缺陷细节 → 标签/包装
+            - 建议上传 3-6 张不同角度的照片
+            - 上传后可删除不需要的照片
+            """)
+
         uploaded_files = st.file_uploader(
             f"选择产品照片（最多{MAX_FILES}张，每张≤{MAX_FILE_SIZE_MB}MB）",
             type=['jpg', 'jpeg', 'png'],
@@ -639,15 +646,31 @@ with col1:
                         st.warning(f"已过滤无效文件，剩余 {len(valid_files)} 张有效图片")
                     uploaded_files = valid_files if valid_files else None
                 
-                if uploaded_files:
-                    st.success(f"已上传 {len(uploaded_files)} 张照片")
-                    cols = st.columns(min(3, len(uploaded_files)))
-                    for idx, file in enumerate(uploaded_files):
-                        with cols[idx % 3]:
-                            try:
-                                st.image(file, caption=file.name, use_column_width=True)
-                            except Exception as img_error:
-                                st.warning(f"[图片加载失败: {file.name}]")
+if uploaded_files:
+    st.success(f"已上传 {len(uploaded_files)} 张照片")
+    st.markdown("---")
+    
+    # 用 columns 布局展示缩略图，每行3张
+    cols = st.columns(3)
+    for idx, file in enumerate(uploaded_files):
+        with cols[idx % 3]:
+            try:
+                st.image(file, caption=f"#{idx+1} {file.name}", use_column_width=True)
+            except Exception as img_error:
+                st.warning(f"[图片加载失败: {file.name}]")
+    
+    # 删除按钮区域
+    st.markdown("**管理已上传图片**")
+    del_cols = st.columns(min(5, len(uploaded_files)))
+    files_to_remove = []
+    for idx in range(len(uploaded_files)):
+        with del_cols[idx % 5]:
+            if st.button(f"删除 #{idx+1}", key=f"del_{idx}"):
+                files_to_remove.append(idx)
+    
+    if files_to_remove:
+        uploaded_files = [f for i, f in enumerate(uploaded_files) if i not in files_to_remove]
+        st.rerun()
 
 with col2:
     st.subheader("2. 填写基本信息")
