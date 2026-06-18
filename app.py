@@ -7,6 +7,113 @@ import openai
 import json
 import base64
 import httpx
+import re
+
+def clean_json_string(s):
+    """清理 JSON 字符串中的常见格式问题"""
+    if not s:
+        return s
+    # 1. 移除末尾逗号（在 } 或 ] 之前）
+    s = re.sub(r',\s*([}\]])', r'\1', s)
+    # 2. 移除单引号包裹的字符串值（JSON 要求双引号）
+    # 这是一个保守的修复，只处理明显的单引号问题
+    s = re.sub(r"(?<=:)\s*'([^']*)'", r'"\1"', s)
+    return s
+
+def extract_balanced_json(text):
+    """
+    使用括号平衡算法从文本中提取完整的 JSON 对象
+    能正确处理嵌套括号和字符串中的转义字符
+    """
+    start_idx = text.find('{')
+    if start_idx == -1:
+        return None
+    
+    depth = 0
+    in_string = False
+    escape_next = False
+    
+    for i in range(start_idx, len(text)):
+        ch = text[i]
+        
+        if escape_next:
+            escape_next = False
+            continue
+        
+        if ch == '\\':
+            escape_next = True
+            continue
+        
+        if ch == '"' and not escape_next:
+            in_string = not in_string
+            continue
+        
+        if not in_string:
+            if ch == '{':
+                depth += 1
+            elif ch == '}':
+                depth -= 1
+                if depth == 0:
+                    return text[start_idx:i+1]
+    
+    return None
+
+def extract_json_robust(text):
+    """
+    从 AI 响应中鲁棒地提取并解析 JSON
+    
+    返回: (success, result_or_error_message)
+    """
+    if not text or not text.strip():
+        return False, "AI 返回了空内容"
+    
+    raw_response = text
+    
+    # ===== 策略1: 直接解析 =====
+    try:
+        result = json.loads(text)
+        return True, result
+    except json.JSONDecodeError:
+        pass
+    
+    # ===== 策略2: 提取 markdown 代码块 =====
+    patterns = [
+        r'```json\s*\n?(.*?)\n?\s*```',
+        r'```\s*\n?(.*?)\n?\s*```',
+    ]
+    
+    for pattern in patterns:
+        match = re.search(pattern, text, re.DOTALL)
+        if match:
+            block_content = match.group(1).strip()
+            try:
+                result = json.loads(block_content)
+                return True, result
+            except json.JSONDecodeError:
+                # 尝试清理后解析
+                cleaned = clean_json_string(block_content)
+                try:
+                    result = json.loads(cleaned)
+                    return True, result
+                except json.JSONDecodeError:
+                    pass
+    
+    # ===== 策略3: 括号平衡提取 =====
+    json_str = extract_balanced_json(text)
+    if json_str:
+        try:
+            result = json.loads(json_str)
+            return True, result
+        except json.JSONDecodeError:
+            cleaned = clean_json_string(json_str)
+            try:
+                result = json.loads(cleaned)
+                return True, result
+            except json.JSONDecodeError as e:
+                return False, f"JSON 解析失败：{str(e)}\n提取内容：{json_str[:200]}"
+    
+    # ===== 所有策略都失败 =====
+    return False, f"无法解析 AI 返回的 JSON。原始响应前 200 字符：\n{raw_response[:200]}"
 
 # ===== 页面配置（必须在所有Streamlit调用之前）=====
 st.set_page_config(
@@ -101,7 +208,6 @@ def validate_uploaded_file(uploaded_file):
     
     return True, None
 
-
 # ===== AI分析函数 =====
 def analyze_product_images(uploaded_files, product_name, inspection_standard):
     """
@@ -155,6 +261,7 @@ def analyze_product_images(uploaded_files, product_name, inspection_standard):
 
 【注意事项】
 [注意] quantity字段必须是整数数字，禁止使用"若干"、"一些"、"多个"等模糊词汇
+[注意] 请确保输出标准 JSON 格式，不要使用尾逗号，字符串使用双引号
 [注意] 如果图片不清晰，description中注明"图片模糊，无法准确判断"
 [注意] 不要编造图片中不存在的缺陷
 [注意] 如果未发现缺陷，defects数组设为空 []
@@ -205,11 +312,14 @@ def analyze_product_images(uploaded_files, product_name, inspection_standard):
         except openai.APIStatusError as e:
             return False, f"API 错误：{e.message}（状态码：{e.status_code}）"
         
-        # 6. 解析响应
+        # 6. 解析响应（使用增强版解析器）
         ai_response = response.choices[0].message.content
         
-        if not ai_response or not ai_response.strip():
-            return False, "AI 返回了空内容，请重试"
+        # 使用增强版 JSON 解析（支持多层 fallback）
+        success, result = extract_json_robust(ai_response)
+        
+        if not success:
+            return False, result
         
         # 7. 解析 JSON（支持 markdown 代码块包裹）
         try:
@@ -375,6 +485,8 @@ if "analysis_result" not in st.session_state:
     st.session_state["analysis_result"] = None
 if "analysis_error" not in st.session_state:
     st.session_state["analysis_error"] = None
+if "last_raw_ai_response" not in st.session_state:
+    st.session_state["last_raw_ai_response"] = None
 
 supabase_ready = is_supabase_configured()
 
