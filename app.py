@@ -809,14 +809,28 @@ if st.session_state.get("analysis_result"):
     # 保存到数据库
     user = st.session_state.get("user")
     if user and supabase_ready:
-        save_report(user["id"], report_data)
-    
-    st.success("报告生成完成！")
-    
+        save_report(user["id"], report_data)   
+    st.success("报告生成完成！")    
     # ===== 显示报告 =====
     st.markdown("---")
-    st.header("验货报告")
-    
+    # 报告头部 - 专业化格式
+    report_header_cols = st.columns([2, 1])
+    with report_header_cols[0]:
+        st.header("验货报告")
+        st.caption(f"报告编号：{report_data['report_id']}")
+    with report_header_cols[1]:
+        st.markdown(f"""
+        **委托方：** {st.session_state.get('user', {}).get('email', '免费体验用户')} 
+        
+        **检验标准：** {report_data.get('inspection_standard', 'AQL 2.5')}        
+        
+        **订单数量：** {report_data.get('order_quantity', 500)} 件        
+        
+        **抽样数量：** {report_data['sample_size']} 件
+        """)
+        
+    st.divider()
+    st.header("验货报告") 
     st.subheader("1. 验货结论")
     col_con1, col_con2, col_con3 = st.columns(3)
     with col_con1:
@@ -824,8 +838,7 @@ if st.session_state.get("analysis_result"):
     with col_con2:
         st.metric("验货日期", report_data["inspection_date"])
     with col_con3:
-        st.metric("抽样数量", f"{report_data['sample_size']} 件")
-    
+        st.metric("抽样数量", f"{report_data['sample_size']} 件")    
     # 结论颜色标识
     conclusion = report_data['conclusion']
     if "合格" in conclusion and "有条件" not in conclusion:
@@ -835,8 +848,7 @@ if st.session_state.get("analysis_result"):
     else:
         st.warning(f"### {conclusion}")
     
-    st.info(f"**建议：** {report_data['recommendation']}")
-    
+    st.info(f"**建议：** {report_data['recommendation']}")    
     # 置信度
     confidence = report_data.get('confidence', 0.5)
     if confidence >= 0.8:
@@ -870,6 +882,28 @@ if st.session_state.get("analysis_result"):
         st.info("未发现明显缺陷")
     
     st.markdown("---")
+        # 缺陷统计摘要
+    if report_data["defects"]:
+        defects = report_data["defects"]
+        severity_counts = {"严重": 0, "中等": 0, "轻微": 0}
+        for d in defects:
+            sev = d.get("severity", "轻微")
+            severity_counts[sev] = severity_counts.get(sev, 0) + 1
+        
+        stat_cols = st.columns(3)
+        with stat_cols[0]:
+            st.metric("严重缺陷", severity_counts.get("严重", 0))
+        with stat_cols[1]:
+            st.metric("中等缺陷", severity_counts.get("中等", 0))
+        with stat_cols[2]:
+            st.metric("轻微缺陷", severity_counts.get("轻微", 0))
+        
+        # 通过率计算
+        if report_data.get("sample_size", 0) > 0:
+            total_defects = sum(d.get("quantity", 1) for d in defects)
+            pass_rate = max(0, (report_data["sample_size"] - total_defects) / report_data["sample_size"] * 100)
+            st.progress(pass_rate / 100, text=f"估算通过率：{pass_rate:.1f}%")
+
     st.subheader("3. 照片附件")
     if uploaded_files:
         photo_cols = st.columns(3)
@@ -894,7 +928,8 @@ if st.session_state.get("analysis_result"):
     with col_pdf2:
         try:
             pdf_buffer = generate_inspection_pdf(report_data, uploaded_files)
-            pdf_filename = f"验货报告_{report_data['product_name']}_{report_data['report_id']}.pdf"
+            conclusion_tag = "合格" if "合格" in report_data['conclusion'] else "不合格"
+            pdf_filename = f"验货报告_{conclusion_tag}_{report_data['product_name']}_{report_data['report_id'][:8]}.pdf"
             st.download_button(
                 label="下载PDF报告",
                 data=pdf_buffer,
@@ -938,6 +973,29 @@ if st.session_state["inspection_history"]:
     with st.sidebar:
         st.markdown("---")
         st.subheader("验货历史")
-        for idx, record in enumerate(st.session_state["inspection_history"][-5:]):
-            st.text(f"{idx+1}. {record['product_name']}")
-            st.caption(f"   {record['inspection_date']} | {record['conclusion']}")
+        
+        # 历史总数
+        total = len(st.session_state["inspection_history"])
+        st.caption(f"共 {total} 条记录")
+        
+        for idx, record in enumerate(reversed(st.session_state["inspection_history"])):
+            with st.expander(f"#{total-idx} {record['product_name']} - {record['inspection_date'][:10]}", expanded=False):
+                col_h1, col_h2 = st.columns(2)
+                with col_h1:
+                    conclusion = record.get("conclusion", "未知")
+                    if "合格" in conclusion and "有条件" not in conclusion:
+                        st.success(conclusion[:20])
+                    elif "不合格" in conclusion:
+                        st.error(conclusion[:20])
+                    else:
+                        st.warning(conclusion[:20])
+                with col_h2:
+                    defect_count = len(record.get("defects", []))
+                    st.metric("缺陷数", f"{defect_count}")
+                
+                st.write(f"**建议：** {record.get('recommendation', '暂无')}")
+                
+                # 删除按钮
+                if st.button("删除此记录", key=f"del_history_{idx}"):
+                    st.session_state["inspection_history"].pop(total - 1 - idx)
+                    st.rerun()
