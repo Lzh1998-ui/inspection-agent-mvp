@@ -514,7 +514,7 @@ if not st.session_state["user"] and not st.session_state["skip_login"]:
         )
         
         st.markdown("---")
-        st.caption(f"版本：0.3.1 (MVP) | Supabase状态：{'已连接' if supabase_ready else '未配置（次数不持久化）'}")
+        st.caption(f"版本：0.3.2 (MVP) | Supabase状态：{'已连接' if supabase_ready else '未配置（次数不持久化）'}")
     
     st.stop()
 
@@ -565,7 +565,7 @@ with st.sidebar:
         st.rerun()
     
     st.markdown("---")
-    st.caption(f"版本：0.3.1 (MVP)")
+    st.caption(f"版本：0.3.2 (MVP)")
     st.caption(f"更新时间：2026-06-18")
 
 # 主界面
