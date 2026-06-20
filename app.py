@@ -285,11 +285,20 @@ def analyze_product_images(uploaded_files, product_name, inspection_standard):
         messages = [
             {
 "role": "system",
-"content": """你是一位拥有15年经验的外贸验货专家，精通ISO 2859-1/2抽样标准、AQL 2.5/4.0质量标准，熟悉电子产品、纺织品、机械配件、玩具等各类产品的国际质量标准（ISO、ASTM、GB、EN等）。
-你的任务是根据用户上传的产品图片，进行专业的质量检验分析。
+"content": """你是一位拥有15年经验的外贸验货专家，精通ISO 2859-1/2抽样标准、AQL质量标准（AQL 0.65/1.0/1.5/2.5/4.0/6.5），熟悉电子产品、纺织品、机械配件、玩具等各类产品的国际质量标准（ISO、ASTM、GB、EN等）。
+你的任务是根据用户上传的产品图片和指定的AQL标准，进行专业的质量检验分析。
 
 用户上传了多张图片，按顺序编号为：图1、图2、图3...。
 在描述缺陷时，请用"图1"、"图2"这样的编号指明缺陷出现在哪张图片中。
+
+【AQL标准说明】
+- AQL 0.65：极严格，适用于关键缺陷（安全/功能）
+- AQL 1.0：严格，适用于重要缺陷
+- AQL 1.5：较严格，电子/纺织行业常用
+- AQL 2.5：通用标准（最常用），适用于一般缺陷
+- AQL 4.0：宽松，适用于外观/包装缺陷
+- AQL 6.5：极宽松，适用于非关键外观缺陷
+
 【输出要求】必须严格按以下JSON格式返回，不要添加任何其他文字：
 {
   "conclusion": "合格/不合格/有条件接受",
@@ -308,8 +317,11 @@ def analyze_product_images(uploaded_files, product_name, inspection_standard):
 }
 
 【判定标准】
-- 合格：无严重缺陷，中等缺陷≤2个，轻微缺陷≤5个
-- 不合格：存在任何严重缺陷，或中等缺陷>2个
+根据用户选择的AQL标准调整判定严格度：
+- AQL 0.65/1.0（严格）：无严重缺陷，中等缺陷≤1个，轻微缺陷≤2个 → 合格
+- AQL 1.5/2.5（通用）：无严重缺陷，中等缺陷≤2个，轻微缺陷≤5个 → 合格
+- AQL 4.0/6.5（宽松）：无严重缺陷，中等缺陷≤3个，轻微缺陷≤8个 → 合格
+- 不合格：存在任何严重缺陷，或中等缺陷超过上述阈值
 - 有条件接受：介于两者之间，需客户确认
 
 【注意事项】
@@ -722,21 +734,22 @@ with col1:
                         st.progress(quality_score / 100, text=f"质量评分：{quality_score}")
                     except Exception as img_error:
                         st.warning(f"[图片加载失败: {file.name}]")
-    # 删除按钮区域
-    st.markdown("**管理已上传图片**")
-    
-    if uploaded_files and len(uploaded_files) > 0:
-        del_cols = st.columns(min(5, len(uploaded_files)))
-        files_to_remove = []
         
-        for idx in range(len(uploaded_files)):
-            with del_cols[idx % 5]:
-                if st.button(f"删除 #{idx+1}", key=f"del_{idx}"):
-                    files_to_remove.append(idx)
+        # 删除按钮区域
+        st.markdown("**管理已上传图片**")
         
-        if files_to_remove:
-            uploaded_files = [f for i, f in enumerate(uploaded_files) if i not in files_to_remove]
-            st.rerun()
+        if uploaded_files and len(uploaded_files) > 0:
+            del_cols = st.columns(min(5, len(uploaded_files)))
+            files_to_remove = []
+            
+            for idx in range(len(uploaded_files)):
+                with del_cols[idx % 5]:
+                    if st.button(f"删除 #{idx+1}", key=f"del_{idx}"):
+                        files_to_remove.append(idx)
+            
+            if files_to_remove:
+                uploaded_files = [f for i, f in enumerate(uploaded_files) if i not in files_to_remove]
+                st.rerun()
 
 with col2:
     st.subheader("2. 填写基本信息")
@@ -749,8 +762,8 @@ with col2:
     
     inspection_standard = st.selectbox(
         "验货标准",
-        options=["AQL 1.5", "AQL 2.5", "AQL 4.0", "AQL 6.5", "客户自定义"],
-        index=1,
+        options=["AQL 0.65", "AQL 1.0", "AQL 1.5", "AQL 2.5", "AQL 4.0", "AQL 6.5", "客户自定义"],
+        index=2,
         help="AQL (Acceptable Quality Limit) 是外贸验货常用标准",
         disabled=is_limit_reached()
     )
