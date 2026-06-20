@@ -725,6 +725,12 @@ with col1:
     # 删除按钮区域
     st.markdown("**管理已上传图片**")
     del_cols = st.columns(min(5, len(uploaded_files)))
+if uploaded_files and len(uploaded_files) > 0:
+    del_cols = st.columns(min(5, len(uploaded_files)))
+    for idx, (col, file) in enumerate(zip(del_cols, uploaded_files)):
+        with col:
+            # ... 删除按钮代码
+
     files_to_remove = []
     for idx in range(len(uploaded_files)):
         with del_cols[idx % 5]:
