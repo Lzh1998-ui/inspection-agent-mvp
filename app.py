@@ -726,7 +726,7 @@ with col1:
     st.markdown("**管理已上传图片**")
 if uploaded_files and len(uploaded_files) > 0:
     del_cols = st.columns(min(5, len(uploaded_files)))
-    for idx, (col, file) in enumerate(zip(del_cols, uploaded_files)):
+    
     for idx in range(len(uploaded_files)):
         with del_cols[idx % 5]:
             if st.button(f"删除 #{idx+1}", key=f"del_{idx}"):
