@@ -724,17 +724,19 @@ with col1:
                         st.warning(f"[图片加载失败: {file.name}]")
     # 删除按钮区域
     st.markdown("**管理已上传图片**")
-if uploaded_files and len(uploaded_files) > 0:
-    del_cols = st.columns(min(5, len(uploaded_files)))
     
-    for idx in range(len(uploaded_files)):
-        with del_cols[idx % 5]:
-            if st.button(f"删除 #{idx+1}", key=f"del_{idx}"):
-                files_to_remove.append(idx)
-    
-    if files_to_remove:
-        uploaded_files = [f for i, f in enumerate(uploaded_files) if i not in files_to_remove]
-        st.rerun()
+    if uploaded_files and len(uploaded_files) > 0:
+        del_cols = st.columns(min(5, len(uploaded_files)))
+        files_to_remove = []
+        
+        for idx in range(len(uploaded_files)):
+            with del_cols[idx % 5]:
+                if st.button(f"删除 #{idx+1}", key=f"del_{idx}"):
+                    files_to_remove.append(idx)
+        
+        if files_to_remove:
+            uploaded_files = [f for i, f in enumerate(uploaded_files) if i not in files_to_remove]
+            st.rerun()
 
 with col2:
     st.subheader("2. 填写基本信息")
