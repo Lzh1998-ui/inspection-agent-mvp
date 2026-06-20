@@ -732,7 +732,7 @@ if uploaded_files and len(uploaded_files) > 0:
             if st.button(f"删除 #{idx+1}", key=f"del_{idx}"):
                 files_to_remove.append(idx)
     
-   if files_to_remove:
+    if files_to_remove:
         uploaded_files = [f for i, f in enumerate(uploaded_files) if i not in files_to_remove]
         st.rerun()
 
