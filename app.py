@@ -1,4 +1,7 @@
 import streamlit as st
+from PIL import Image, ImageStat
+import io
+import numpy as np
 import os
 from datetime import datetime, timezone, timedelta
 import base64
@@ -96,8 +99,7 @@ def extract_json_robust(text):
                     result = json.loads(cleaned)
                     return True, result
                 except json.JSONDecodeError:
-                    pass
-    
+                    pass   
     # ===== 策略3: 括号平衡提取 =====
     json_str = extract_balanced_json(text)
     if json_str:
@@ -110,36 +112,29 @@ def extract_json_robust(text):
                 result = json.loads(cleaned)
                 return True, result
             except json.JSONDecodeError as e:
-                return False, f"JSON 解析失败：{str(e)}\n提取内容：{json_str[:200]}"
-    
+                return False, f"JSON 解析失败：{str(e)}\n提取内容：{json_str[:200]}"    
     # ===== 所有策略都失败 =====
     return False, f"无法解析 AI 返回的 JSON。原始响应前 200 字符：\n{raw_response[:200]}"
-
 # ===== 页面配置（必须在所有Streamlit调用之前）=====
 st.set_page_config(
     page_title="外贸验货AI Agent - MVP",
     page_icon="📦",
     layout="wide"
 )
-
 # 导入PDF生成模块
 from generate_pdf import generate_inspection_pdf, check_font_available
-
 # 导入用户认证模块
 from auth_helper import (
     is_supabase_configured,
     sign_up, sign_in, sign_out,
     update_inspection_count, save_report, get_reports, get_user_count
 )
-
 # ===== 配置 =====
 MAX_FILE_SIZE_MB = 5  # 单个图片最大 5MB
 MAX_FILES = 10       # 最多上传 10 张图片
 API_TIMEOUT_SECONDS = 60  # API 调用超时时间
-
 # ===== 配置API客户端 =====
 # 优先级：通义千问VL > DeepSeek > OpenAI
-
 def get_ai_client():
     """
     获取AI客户端（通义千问/DeepSeek/OpenAI）
@@ -154,8 +149,7 @@ def get_ai_client():
                 base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
                 timeout=httpx.Timeout(API_TIMEOUT_SECONDS, connect=10.0)
             )
-            return client, "qwen-vl-plus"
-        
+            return client, "qwen-vl-plus"        
         # 2. 降级到DeepSeek（便宜，仅文本）
         deepseek_key = st.secrets.get("deepseek", {}).get("api_key")
         if deepseek_key:
@@ -164,8 +158,7 @@ def get_ai_client():
                 base_url="https://api.deepseek.com",
                 timeout=httpx.Timeout(API_TIMEOUT_SECONDS, connect=10.0)
             )
-            return client, "deepseek-chat"
-        
+            return client, "deepseek-chat"        
         # 3. 降级到OpenAI（贵，但稳定）
         openai_key = st.secrets.get("openai", {}).get("api_key", os.getenv("OPENAI_API_KEY"))
         if openai_key:
@@ -173,15 +166,11 @@ def get_ai_client():
                 api_key=openai_key,
                 timeout=httpx.Timeout(API_TIMEOUT_SECONDS, connect=10.0)
             )
-            return client, "gpt-4o"
-        
+            return client, "gpt-4o"        
         # 未配置任何 API Key
-        return None, "未配置API Key，请在 Streamlit Cloud Secrets 中配置 qwen/deepseek/openai 的 api_key"
-    
+        return None, "未配置API Key，请在 Streamlit Cloud Secrets 中配置 qwen/deepseek/openai 的 api_key"    
     except Exception as e:
         return None, f"API客户端初始化失败：{str(e)}"
-
-
 def check_api_available():
     """检查 API 是否可用，返回 (is_available, error_message)"""
     client, result = get_ai_client()
@@ -189,8 +178,6 @@ def check_api_available():
         return True, None
     else:
         return False, result
-
-
 # ===== 图片校验函数 =====
 def validate_uploaded_file(uploaded_file):
     """
@@ -204,10 +191,76 @@ def validate_uploaded_file(uploaded_file):
     # 检查文件大小
     file_size_mb = len(uploaded_file.getvalue()) / (1024 * 1024)
     if file_size_mb > MAX_FILE_SIZE_MB:
-        return False, f"文件过大：{uploaded_file.name}（{file_size_mb:.1f}MB > {MAX_FILE_SIZE_MB}MB）"
-    
+        return False, f"文件过大：{uploaded_file.name}（{file_size_mb:.1f}MB > {MAX_FILE_SIZE_MB}MB）"    
     return True, None
-
+def check_image_quality(uploaded_file):
+    """
+    检查图片质量：尺寸、模糊度、亮度
+    返回: (quality_score, warnings)
+    quality_score: 0-100
+    warnings: 字符串列表
+    """
+    warnings = []
+    score = 100
+    img = None
+    
+    try:
+        image_bytes = uploaded_file.getvalue()
+        img = Image.open(io.BytesIO(image_bytes))
+        img.verify()  # 验证图片格式
+        img = Image.open(io.BytesIO(image_bytes))  # verify 后需要重新打开
+    except Exception as e:
+        return 0, [f"无法读取图片：{str(e)}"]
+    
+    width, height = img.size
+    
+    # 1. 尺寸检查
+    min_size = min(width, height)
+    if min_size < 800:
+        warnings.append(f"图片尺寸较小（{width}x{height}），建议至少 800x800 像素")
+        score -= 15
+    elif min_size < 1200:
+        warnings.append(f"图片清晰度一般（{width}x{height}），建议拍摄更清晰的图片")
+        score -= 5
+    
+    # 2. 亮度检查
+    grayscale = img.convert("L")
+    stat = ImageStat.Stat(grayscale)
+    brightness = stat.mean[0]
+    
+    if brightness < 50:
+        warnings.append("图片太暗，可能导致缺陷识别失败")
+        score -= 20
+    elif brightness > 240:
+        warnings.append("图片过曝，细节可能丢失")
+        score -= 10
+    
+    # 3. 模糊检测（需要 numpy）
+    try:
+        gray_array = np.array(grayscale)
+        # 拉普拉斯方差
+        laplacian_var = np.var(
+            np.array([
+                gray_array[2:, 1:-1] + gray_array[:-2, 1:-1] + gray_array[1:-1, 2:] + gray_array[1:-1, :-2]
+                - 4 * gray_array[1:-1, 1:-1]
+            ]).flatten()
+        )
+        
+        if laplacian_var < 50:
+            warnings.append("图片模糊，建议重新对焦拍摄")
+            score -= 25
+        elif laplacian_var < 100:
+            warnings.append("图片 slightly 模糊，建议拍摄更清楚")
+            score -= 10
+    except Exception:
+        pass  # 模糊检测失败不影响主流程
+    
+    # 4. 宽高比检查
+    ratio = max(width, height) / min(width, height)
+    if ratio > 3:
+        warnings.append("图片过于细长，建议拍摄更接近正方形的角度")
+        score -= 5
+    return max(0, score), warnings
 # ===== AI分析函数 =====
 def analyze_product_images(uploaded_files, product_name, inspection_standard):
     """
@@ -231,13 +284,13 @@ def analyze_product_images(uploaded_files, product_name, inspection_standard):
         # 3. 构建消息
         messages = [
             {
-                "role": "system",
-                "content": """你是一位拥有15年经验的外贸验货专家，精通ISO 2859-1/2抽样标准、AQL 2.5/4.0质量标准，熟悉电子产品、纺织品、机械配件、玩具等各类产品的国际质量标准（ISO、ASTM、GB、EN等）。
-
+"role": "system",
+"content": """你是一位拥有15年经验的外贸验货专家，精通ISO 2859-1/2抽样标准、AQL 2.5/4.0质量标准，熟悉电子产品、纺织品、机械配件、玩具等各类产品的国际质量标准（ISO、ASTM、GB、EN等）。
 你的任务是根据用户上传的产品图片，进行专业的质量检验分析。
 
+用户上传了多张图片，按顺序编号为：图1、图2、图3...。
+在描述缺陷时，请用"图1"、"图2"这样的编号指明缺陷出现在哪张图片中。
 【输出要求】必须严格按以下JSON格式返回，不要添加任何其他文字：
-
 {
   "conclusion": "合格/不合格/有条件接受",
   "defects": [
@@ -246,7 +299,7 @@ def analyze_product_images(uploaded_files, product_name, inspection_standard):
       "quantity": 数字（必须是整数，如3，不能写"若干"或"少量"）,
       "severity": "严重/中等/轻微",
       "description": "详细描述缺陷位置、大小、程度（50字以内）",
-      "image": ""（始终为空字符串）
+      "image": "图1 / 图2 / 图3"（缺陷出现在哪张图片，用编号表示；不确定则写"未明确"）
     }
   ],
   "recommendation": "处理建议（100字以内，包含具体改进措施）",
@@ -377,8 +430,6 @@ def analyze_product_images(uploaded_files, product_name, inspection_standard):
     
     except Exception as e:
         return False, f"AI 分析过程发生未知错误：{str(e)}"
-
-
 # ===== 辅助函数 =====
 def get_remaining():
     """获取当前用户剩余次数"""
@@ -458,7 +509,6 @@ def show_auth_ui():
     if st.button("免登录体验", use_container_width=True):
         st.session_state["skip_login"] = True
         st.rerun()
-
 def show_user_info():
     """显示已登录用户信息"""
     user = st.session_state.get("user")
@@ -468,7 +518,6 @@ def show_user_info():
         st.metric("剩余次数", f"{remaining} 次")
         st.caption(f"已使用 {user['inspection_count']} / {user['inspection_limit']} 次")
         st.markdown("---")
-
 # ===== 初始化session_state =====
 if "inspection_count" not in st.session_state:
     st.session_state["inspection_count"] = 0
@@ -488,20 +537,15 @@ if "analysis_error" not in st.session_state:
     st.session_state["analysis_error"] = None
 if "last_raw_ai_response" not in st.session_state:
     st.session_state["last_raw_ai_response"] = None
-
 supabase_ready = is_supabase_configured()
-
 # ===== 处理未登录状态 =====
 if not st.session_state["user"] and not st.session_state["skip_login"]:
     # 未登录：显示登录/注册页面
     st.title("外贸验货AI Agent - MVP")
     st.markdown("---")
-    
-    col_auth1, col_auth2 = st.columns([1, 1])
-    
+    col_auth1, col_auth2 = st.columns([1, 1])    
     with col_auth1:
-        show_auth_ui()
-    
+        show_auth_ui()    
     with col_auth2:
         st.subheader("关于本应用")
         st.info(
@@ -515,16 +559,12 @@ if not st.session_state["user"] and not st.session_state["skip_login"]:
         )
         
         st.markdown("---")
-        st.caption(f"版本：0.3.2 (MVP) | Supabase状态：{'已连接' if supabase_ready else '未配置（次数不持久化）'}")
-    
-    st.stop()
-
+        st.caption(f"版本：0.3.2 (MVP) | Supabase状态：{'已连接' if supabase_ready else '未配置（次数不持久化）'}")  
+        st.stop()
 # ===== 已登录：显示主应用 =====
-
 # 标题
 st.title("外贸验货AI Agent - MVP")
 st.markdown("---")
-
 # ===== 侧边栏 =====
 with st.sidebar:
     st.header("关于")
@@ -603,11 +643,13 @@ with col1:
             
             st.markdown("---")
             st.markdown(f"""
-            **[拍照小贴士]**
-            - 每次只拍1个产品
-            - 缺陷细节要清晰对焦
-            - 整体+局部各拍1张
-            - 建议上传3-{MAX_FILES}张不同角度
+            **必须拍摄的照片类型：**
+            1. **整体图** — 产品完整外观，至少1张
+            2. **细节图** — 缺陷或关键部位特写
+            3. **标签/包装图** — 产品标签、包装、条码        
+            **建议：**
+            - 光线充足，不要逆光
+            - 每张图只聚焦1个产品/1个缺陷
             - 单张图片不超过 {MAX_FILE_SIZE_MB}MB
             """)
             st.markdown("""
@@ -624,41 +666,62 @@ with col1:
             disabled=is_limit_reached()
         )
         
-        # 文件校验
+    # 文件校验
+    if uploaded_files:
+    if len(uploaded_files) > MAX_FILES:
+        st.error(f"上传图片数量超限：{len(uploaded_files)} 张 > {MAX_FILES} 张")
+        uploaded_files = None
+    else:
+        valid_files = []
+        quality_issues = []
+        has_error = False
+        
+        for file in uploaded_files:
+            # 基础校验（格式、大小）
+            is_valid, error_msg = validate_uploaded_file(file)
+            if not is_valid:
+                st.error(error_msg)
+                has_error = True
+                continue
+            
+            # 质量检查
+            quality_score, warnings = check_image_quality(file)
+            if quality_score < 60:
+                # 质量太差，直接拒绝
+                quality_issues.append(f"#{file.name} 质量评分 {quality_score} 分，建议重新拍摄")
+                has_error = True
+                continue
+            elif warnings:
+                quality_issues.append(f"#{file.name}：{'；'.join(warnings)}")
+            
+            valid_files.append(file)
+        
+        if quality_issues:
+            st.warning("**图片质量提醒：**\n" + "\n".join(f"- {issue}" for issue in quality_issues))
+        
+        if has_error and not valid_files:
+            uploaded_files = None
+        elif has_error and valid_files:
+            st.warning(f"部分图片被过滤，剩余 {len(valid_files)} 张有效图片")
+            uploaded_files = valid_files
+        else:
+            uploaded_files = valid_files
+        
         if uploaded_files:
-            if len(uploaded_files) > MAX_FILES:
-                st.error(f"上传图片数量超限：{len(uploaded_files)} 张 > {MAX_FILES} 张")
-                uploaded_files = None
-            else:
-                valid_files = []
-                has_error = False
-                
-                for file in uploaded_files:
-                    is_valid, error_msg = validate_uploaded_file(file)
-                    if is_valid:
-                        valid_files.append(file)
-                    else:
-                        st.error(error_msg)
-                        has_error = True
-                
-                if has_error:
-                    if valid_files:
-                        st.warning(f"已过滤无效文件，剩余 {len(valid_files)} 张有效图片")
-                    uploaded_files = valid_files if valid_files else None
-                
-if uploaded_files:
-    st.success(f"已上传 {len(uploaded_files)} 张照片")
-    st.markdown("---")
-    
-    # 用 columns 布局展示缩略图，每行3张
-    cols = st.columns(3)
-    for idx, file in enumerate(uploaded_files):
-        with cols[idx % 3]:
-            try:
-                st.image(file, caption=f"#{idx+1} {file.name}", use_column_width=True)
-            except Exception as img_error:
-                st.warning(f"[图片加载失败: {file.name}]")
-    
+            st.success(f"已通过质量检测 {len(uploaded_files)} 张照片")
+            cols = st.columns(min(3, len(uploaded_files)))
+            for idx, file in enumerate(uploaded_files):
+                quality_score, warnings = check_image_quality(file)
+                with cols[idx % 3]:
+                    try:
+                        caption = f"#{idx+1} {file.name}"
+                        if warnings:
+                            caption += f"\\n⚠️ {warnings[0]}"
+                        st.image(file, caption=caption, use_column_width=True)
+                        # 质量进度条
+                        st.progress(quality_score / 100, text=f"质量评分：{quality_score}")
+                    except Exception as img_error:
+                        st.warning(f"[图片加载失败: {file.name}]")
     # 删除按钮区域
     st.markdown("**管理已上传图片**")
     del_cols = st.columns(min(5, len(uploaded_files)))
@@ -751,8 +814,7 @@ with col_btn2:
                     uploaded_files, 
                     product_name.strip(), 
                     inspection_standard
-                )
-            
+                )         
             if not success:
                 # 分析失败 - 回退次数
                 if user:
@@ -765,13 +827,11 @@ with col_btn2:
                 
                 st.session_state["analysis_error"] = result
                 st.session_state["analysis_result"] = None
-                st.rerun()
-            
+                st.rerun()            
             # 分析成功
             st.session_state["analysis_result"] = result
             st.session_state["analysis_error"] = None
             st.rerun()
-
 # ===== 显示分析错误 =====
 if st.session_state.get("analysis_error"):
     st.markdown("---")
