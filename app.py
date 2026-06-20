@@ -747,7 +747,7 @@ with col2:
     
     inspection_standard = st.selectbox(
         "验货标准",
-        options=["AQL 1.5", "AQL 2.5", "客户自定义"],
+        options=["AQL 1.5", "AQL 2.5", "AQL 4.0", "AQL 6.5", "客户自定义"],
         index=1,
         help="AQL (Acceptable Quality Limit) 是外贸验货常用标准",
         disabled=is_limit_reached()
