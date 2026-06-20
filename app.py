@@ -668,13 +668,13 @@ with col1:
         
     # 文件校验
     if uploaded_files:
-    if len(uploaded_files) > MAX_FILES:
-        st.error(f"上传图片数量超限：{len(uploaded_files)} 张 > {MAX_FILES} 张")
-        uploaded_files = None
-    else:
-        valid_files = []
-        quality_issues = []
-        has_error = False
+        if len(uploaded_files) > MAX_FILES:
+            st.error(f"上传图片数量超限：{len(uploaded_files)} 张 > {MAX_FILES} 张")
+            uploaded_files = None
+        else:
+            valid_files = []
+            quality_issues = []
+            has_error = False
         
         for file in uploaded_files:
             # 基础校验（格式、大小）
