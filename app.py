@@ -127,7 +127,8 @@ from generate_pdf import generate_inspection_pdf, check_font_available
 from auth_helper import (
     is_supabase_configured,
     sign_up, sign_in, sign_out,
-    update_inspection_count, save_report, get_reports, get_user_count
+    update_inspection_count, save_report, get_reports, get_user_count,
+    get_ip_usage, increment_ip_usage, decrement_ip_usage
 )
 # ===== 配置 =====
 MAX_FILE_SIZE_MB = 5  # 单个图片最大 5MB
@@ -490,22 +491,33 @@ def get_remaining():
     if user:
         return user["inspection_limit"] - user["inspection_count"]
     else:
-        return st.session_state["inspection_limit"] - st.session_state["inspection_count"]
+        local_count = st.session_state["inspection_count"]
+        ip_count = st.session_state.get("ip_usage_count", 0)
+        effective_count = max(local_count, ip_count)
+        return st.session_state["inspection_limit"] - effective_count
 
 def is_limit_reached():
-    """检查是否达到使用次数限制"""
+    """检查是否达到使用次数限制（本地 + IP 双重检查）"""
     user = st.session_state.get("user")
     if user:
         return user["inspection_count"] >= user["inspection_limit"]
     else:
-        return st.session_state["inspection_count"] >= st.session_state["inspection_limit"]
+        # 本地计数
+        local_count = st.session_state["inspection_count"]
+        # IP 计数（Supabase 持久化，跨浏览器有效）
+        ip_count = st.session_state.get("ip_usage_count", 0)
+        # 取两者较大值
+        effective_count = max(local_count, ip_count)
+        return effective_count >= st.session_state["inspection_limit"]
 
 def get_inspection_count():
     """获取当前用户已使用次数"""
     user = st.session_state.get("user")
     if user:
         return user["inspection_count"]
-    return st.session_state["inspection_count"]
+    local_count = st.session_state["inspection_count"]
+    ip_count = st.session_state.get("ip_usage_count", 0)
+    return max(local_count, ip_count)
 
 def get_inspection_limit():
     """获取当前用户总限制"""
@@ -592,6 +604,18 @@ if "analysis_error" not in st.session_state:
 if "last_raw_ai_response" not in st.session_state:
     st.session_state["last_raw_ai_response"] = None
 supabase_ready = is_supabase_configured()
+
+# 加载 Supabase IP 追踪（防换浏览器白嫖）
+if "ip_usage_loaded" not in st.session_state:
+    st.session_state["ip_usage_loaded"] = True
+    if supabase_ready:
+        client_ip = get_client_ip()
+        this_month = datetime.now().strftime("%Y-%m")
+        ip_count = get_ip_usage(client_ip, this_month)
+        st.session_state["ip_usage_count"] = ip_count
+    else:
+        st.session_state["ip_usage_count"] = 0
+
 # ===== 处理未登录状态 =====
 if not st.session_state["user"] and not st.session_state["skip_login"]:
     # 未登录：显示登录/注册页面
@@ -867,8 +891,12 @@ with col_btn2:
             else:
                 st.session_state["inspection_count"] += 1
                 save_usage_count(st.session_state["inspection_count"])
-            
-            # 同步到数据库
+                # 同步 IP 计数到 Supabase（防换浏览器）
+                if supabase_ready:
+                    client_ip = get_client_ip()
+                    this_month = datetime.now().strftime("%Y-%m")
+                    increment_ip_usage(client_ip, this_month)
+                    st.session_state["ip_usage_count"] = get_ip_usage(client_ip, this_month)
             if user and supabase_ready:
                 update_inspection_count(user["id"], user["inspection_count"])
             
@@ -886,13 +914,20 @@ with col_btn2:
                 else:
                     st.session_state["inspection_count"] -= 1
                     save_usage_count(st.session_state["inspection_count"])
+                    # 回退 IP 计数
+                    if supabase_ready:
+                        client_ip = get_client_ip()
+                        this_month = datetime.now().strftime("%Y-%m")
+                        decrement_ip_usage(client_ip, this_month)
+                        st.session_state["ip_usage_count"] = get_ip_usage(client_ip, this_month)
                 
                 if user and supabase_ready:
                     update_inspection_count(user["id"], user["inspection_count"])
                 
                 st.session_state["analysis_error"] = result
                 st.session_state["analysis_result"] = None
-                st.rerun()            
+                st.rerun()
+            
             # 分析成功
             st.session_state["analysis_result"] = result
             st.session_state["analysis_error"] = None
