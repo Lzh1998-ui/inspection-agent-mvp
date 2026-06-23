@@ -197,3 +197,83 @@ def get_user_count(user_id):
     except Exception:
         pass
     return 0, 20
+
+
+# ===== IP 追踪（防换浏览器/无痕模式白嫖）=====
+
+def get_ip_usage(ip_address, usage_month):
+    """获取IP地址当月的使用次数"""
+    sb = get_supabase()
+    if not sb or not ip_address or ip_address == "unknown":
+        return 0
+    
+    try:
+        resp = sb.table("ip_usage")\
+            .select("usage_count")\
+            .eq("ip_address", ip_address)\
+            .eq("usage_month", usage_month)\
+            .execute()
+        if resp.data:
+            return resp.data[0].get("usage_count", 0)
+        return 0
+    except Exception:
+        return 0
+
+def increment_ip_usage(ip_address, usage_month):
+    """增加IP地址当月使用次数"""
+    sb = get_supabase()
+    if not sb or not ip_address or ip_address == "unknown":
+        return False
+    
+    try:
+        existing = sb.table("ip_usage")\
+            .select("usage_count")\
+            .eq("ip_address", ip_address)\
+            .eq("usage_month", usage_month)\
+            .execute()
+        
+        if existing.data:
+            sb.table("ip_usage")\
+                .update({
+                    "usage_count": existing.data[0]["usage_count"] + 1,
+                    "last_used": datetime.now(timezone.utc).isoformat()
+                })\
+                .eq("ip_address", ip_address)\
+                .eq("usage_month", usage_month)\
+                .execute()
+        else:
+            sb.table("ip_usage").insert({
+                "ip_address": ip_address,
+                "usage_month": usage_month,
+                "usage_count": 1,
+                "last_used": datetime.now(timezone.utc).isoformat()
+            }).execute()
+        return True
+    except Exception:
+        return False
+
+def decrement_ip_usage(ip_address, usage_month):
+    """减少IP地址当月使用次数（分析失败回退）"""
+    sb = get_supabase()
+    if not sb or not ip_address or ip_address == "unknown":
+        return False
+    
+    try:
+        existing = sb.table("ip_usage")\
+            .select("usage_count")\
+            .eq("ip_address", ip_address)\
+            .eq("usage_month", usage_month)\
+            .execute()
+        
+        if existing.data and existing.data[0]["usage_count"] > 0:
+            sb.table("ip_usage")\
+                .update({
+                    "usage_count": existing.data[0]["usage_count"] - 1,
+                    "last_used": datetime.now(timezone.utc).isoformat()
+                })\
+                .eq("ip_address", ip_address)\
+                .eq("usage_month", usage_month)\
+                .execute()
+        return True
+    except Exception:
+        return False
