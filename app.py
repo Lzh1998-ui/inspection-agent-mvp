@@ -980,7 +980,7 @@ if st.session_state.get("analysis_result"):
         st.caption(f"报告编号：{report_data['report_id']}")
     with report_header_cols[1]:
         st.markdown(f"""
-        **委托方：** {st.session_state.get('user', {}).get('email', '免费体验用户')} 
+        **委托方：** {(st.session_state.get('user') or {}).get('email', '免费体验用户')} 
         
         **检验标准：** {report_data.get('inspection_standard', 'AQL 2.5')}        
         
