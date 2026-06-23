@@ -443,6 +443,47 @@ def analyze_product_images(uploaded_files, product_name, inspection_standard):
     except Exception as e:
         return False, f"AI 分析过程发生未知错误：{str(e)}"
 # ===== 辅助函数 =====
+def load_usage_count():
+    """从 query_params 加载持久化的使用计数（防止刷新重置）"""
+    today = datetime.now().strftime("%Y-%m-%d")
+    
+    saved_date = st.query_params.get("daily_usage_date", "")
+    saved_count = st.query_params.get("daily_usage_count", "0")
+    
+    try:
+        saved_count = int(saved_count)
+    except:
+        saved_count = 0
+    
+    # 如果日期变了（新的一天），重置计数
+    if saved_date != today:
+        saved_count = 0
+    
+    return saved_count
+
+def save_usage_count(count):
+    """持久化使用计数到 query_params"""
+    try:
+        st.query_params["daily_usage_date"] = datetime.now().strftime("%Y-%m-%d")
+        st.query_params["daily_usage_count"] = str(count)
+    except:
+        pass  # query_params 写入失败时静默处理
+
+def get_client_ip():
+    """获取客户端IP地址"""
+    try:
+        # Streamlit Cloud/Server 通过请求头获取
+        headers = st.context.headers
+        forwarded = headers.get("X-Forwarded-For", "")
+        if forwarded:
+            return forwarded.split(",")[0].strip()
+        real_ip = headers.get("X-Real-IP", "")
+        if real_ip:
+            return real_ip
+        return "unknown"
+    except:
+        return "unknown"
+
 def get_remaining():
     """获取当前用户剩余次数"""
     user = st.session_state.get("user")
@@ -532,7 +573,8 @@ def show_user_info():
         st.markdown("---")
 # ===== 初始化session_state =====
 if "inspection_count" not in st.session_state:
-    st.session_state["inspection_count"] = 0
+    st.session_state["inspection_count"] = load_usage_count()
+    save_usage_count(st.session_state["inspection_count"])
 if "inspection_limit" not in st.session_state:
     st.session_state["inspection_limit"] = 3
 if "inspection_history" not in st.session_state:
@@ -598,6 +640,11 @@ with st.sidebar:
         st.warning(f"剩余次数不多")
     
     st.caption(f"每用户 {get_inspection_limit()} 次")
+    
+    # 安全信息（仅管理员可见）
+    client_ip = get_client_ip()
+    if client_ip != "unknown":
+        st.caption(f"IP: {client_ip}")
     st.markdown("---")
     
     # ROI展示
@@ -819,6 +866,7 @@ with col_btn2:
                 user["inspection_count"] += 1
             else:
                 st.session_state["inspection_count"] += 1
+                save_usage_count(st.session_state["inspection_count"])
             
             # 同步到数据库
             if user and supabase_ready:
@@ -837,6 +885,7 @@ with col_btn2:
                     user["inspection_count"] -= 1
                 else:
                     st.session_state["inspection_count"] -= 1
+                    save_usage_count(st.session_state["inspection_count"])
                 
                 if user and supabase_ready:
                     update_inspection_count(user["id"], user["inspection_count"])
