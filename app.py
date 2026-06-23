@@ -1164,4 +1164,3 @@ if st.session_state["inspection_history"]:
                 if st.button("删除此记录", key=f"del_history_{idx}"):
                     st.session_state["inspection_history"].pop(total - 1 - idx)
                     st.rerun()
-
