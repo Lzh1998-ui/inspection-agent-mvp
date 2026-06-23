@@ -584,9 +584,7 @@ def show_user_info():
         st.caption(f"已使用 {user['inspection_count']} / {user['inspection_limit']} 次")
         st.markdown("---")
 # ===== 初始化session_state =====
-if "inspection_count" not in st.session_state:
-    st.session_state["inspection_count"] = load_usage_count()
-    save_usage_count(st.session_state["inspection_count"])
+# inspection_count 已在下方 IP 追踪块中初始化（取 max(本地, IP)）
 if "inspection_limit" not in st.session_state:
     st.session_state["inspection_limit"] = 10
 if "inspection_history" not in st.session_state:
@@ -605,6 +603,10 @@ if "last_raw_ai_response" not in st.session_state:
     st.session_state["last_raw_ai_response"] = None
 supabase_ready = is_supabase_configured()
 
+# 先初始化 inspection_count（从 query_params）
+if "inspection_count" not in st.session_state:
+    st.session_state["inspection_count"] = load_usage_count()
+
 # 加载 Supabase IP 追踪（防换浏览器白嫖）
 if "ip_usage_loaded" not in st.session_state:
     st.session_state["ip_usage_loaded"] = True
@@ -613,6 +615,9 @@ if "ip_usage_loaded" not in st.session_state:
         this_month = datetime.now().strftime("%Y-%m")
         ip_count = get_ip_usage(client_ip, this_month)
         st.session_state["ip_usage_count"] = ip_count
+        # 关键修复：本地计数取 max(本地, IP)，防止关闭重置
+        st.session_state["inspection_count"] = max(st.session_state["inspection_count"], ip_count)
+        save_usage_count(st.session_state["inspection_count"])
     else:
         st.session_state["ip_usage_count"] = 0
 
@@ -1159,3 +1164,4 @@ if st.session_state["inspection_history"]:
                 if st.button("删除此记录", key=f"del_history_{idx}"):
                     st.session_state["inspection_history"].pop(total - 1 - idx)
                     st.rerun()
+
