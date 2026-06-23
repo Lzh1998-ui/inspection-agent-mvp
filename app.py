@@ -444,19 +444,19 @@ def analyze_product_images(uploaded_files, product_name, inspection_standard):
         return False, f"AI 分析过程发生未知错误：{str(e)}"
 # ===== 辅助函数 =====
 def load_usage_count():
-    """从 query_params 加载持久化的使用计数（防止刷新重置）"""
-    today = datetime.now().strftime("%Y-%m-%d")
+    """从 query_params 加载持久化的使用计数（按月重置）"""
+    this_month = datetime.now().strftime("%Y-%m")
     
-    saved_date = st.query_params.get("daily_usage_date", "")
-    saved_count = st.query_params.get("daily_usage_count", "0")
+    saved_month = st.query_params.get("monthly_usage_month", "")
+    saved_count = st.query_params.get("monthly_usage_count", "0")
     
     try:
         saved_count = int(saved_count)
     except:
         saved_count = 0
     
-    # 如果日期变了（新的一天），重置计数
-    if saved_date != today:
+    # 如果月份变了，重置计数
+    if saved_month != this_month:
         saved_count = 0
     
     return saved_count
@@ -464,8 +464,8 @@ def load_usage_count():
 def save_usage_count(count):
     """持久化使用计数到 query_params"""
     try:
-        st.query_params["daily_usage_date"] = datetime.now().strftime("%Y-%m-%d")
-        st.query_params["daily_usage_count"] = str(count)
+        st.query_params["monthly_usage_month"] = datetime.now().strftime("%Y-%m")
+        st.query_params["monthly_usage_count"] = str(count)
     except:
         pass  # query_params 写入失败时静默处理
 
@@ -576,7 +576,7 @@ if "inspection_count" not in st.session_state:
     st.session_state["inspection_count"] = load_usage_count()
     save_usage_count(st.session_state["inspection_count"])
 if "inspection_limit" not in st.session_state:
-    st.session_state["inspection_limit"] = 3
+    st.session_state["inspection_limit"] = 10
 if "inspection_history" not in st.session_state:
     st.session_state["inspection_history"] = []
 if "total_savings" not in st.session_state:
@@ -604,7 +604,7 @@ if not st.session_state["user"] and not st.session_state["skip_login"]:
         st.subheader("关于本应用")
         st.info(
             "上传产品照片 → AI自动分析缺陷 → 生成专业验货报告\n\n"
-            "**免费体验：** 每用户3次/天\n\n"
+            "**免费体验：** 每用户10次/月\n\n"
             "**适用场景：**\n"
             "- 外贸验货员\n"
             "- 质检部门\n"
@@ -639,7 +639,7 @@ with st.sidebar:
     if remaining <= 2:
         st.warning(f"剩余次数不多")
     
-    st.caption(f"每用户 {get_inspection_limit()} 次")
+    st.caption(f"每用户 {get_inspection_limit()} 次/月")
     
     # 安全信息（仅管理员可见）
     client_ip = get_client_ip()
