@@ -66,7 +66,7 @@ def sign_up(email, password, display_name=""):
                 }).execute()
             except Exception as e:
                 print(f"[DEBUG] 创建用户配置失败: {e}")
-                pass  # 可能已经存在
+                pass
             
             return True, "注册成功！请检查邮箱确认链接（部分情况下可直接登录）"
         return False, "注册失败"
@@ -94,19 +94,14 @@ def sign_in(email, password):
         })
         
         if resp.user:
-            # 获取用户配置
             user_data = {
                 "id": resp.user.id,
                 "email": resp.user.email or email,
                 "display_name": resp.user.user_metadata.get("display_name", email.split("@")[0])
             }
             
-            # 获取用户配置
             try:
-                profile = sb.table("user_profiles")\
-                    .select("*")\
-                    .eq("id", resp.user.id)\
-                    .execute()
+                profile = sb.table("user_profiles").select("*").eq("id", resp.user.id).execute()
                 
                 if profile.data:
                     user_data["inspection_count"] = profile.data[0].get("inspection_count", 0)
@@ -144,13 +139,10 @@ def update_inspection_count(user_id, new_count):
         return False
     
     try:
-        sb.table("user_profiles")\
-            .update({
-                "inspection_count": new_count,
-                "updated_at": datetime.now(timezone.utc).isoformat()
-            })\
-            .eq("id", user_id)\
-            .execute()
+        sb.table("user_profiles").update({
+            "inspection_count": new_count,
+            "updated_at": datetime.now(timezone.utc).isoformat()
+        }).eq("id", user_id).execute()
         return True
     except Exception as e:
         print(f"[DEBUG] 更新验货次数失败: {e}")
@@ -181,12 +173,7 @@ def get_reports(user_id, limit=10):
         return []
     
     try:
-        resp = sb.table("inspection_reports")\
-            .select("*")\
-            .eq("user_id", user_id)\
-            .order("created_at", desc=True)\
-            .limit(limit)\
-            .execute()
+        resp = sb.table("inspection_reports").select("*").eq("user_id", user_id).order("created_at", desc=True).limit(limit).execute()
         return resp.data if resp.data else []
     except Exception as e:
         print(f"[DEBUG] 获取报告失败: {e}")
@@ -199,10 +186,7 @@ def get_user_count(user_id):
         return 0, 20
     
     try:
-        resp = sb.table("user_profiles")\
-            .select("inspection_count, inspection_limit")\
-            .eq("id", user_id)\
-            .execute()
+        resp = sb.table("user_profiles").select("inspection_count, inspection_limit").eq("id", user_id).execute()
         if resp.data:
             return resp.data[0].get("inspection_count", 0), resp.data[0].get("inspection_limit", 20)
     except Exception as e:
@@ -230,11 +214,7 @@ def get_ip_usage(ip_address, month):
         return 0
     
     try:
-        resp = sb.table("ip_usage")\
-            .select("usage_count")\
-            .eq("ip_address", ip_address)\
-            .eq("month", month)\  # 修复：使用 month 字段
-            .execute()
+        resp = sb.table("ip_usage").select("usage_count").eq("ip_address", ip_address).eq("month", month).execute()
         
         if resp.data:
             count = resp.data[0].get("usage_count", 0)
@@ -264,29 +244,21 @@ def increment_ip_usage(ip_address, month):
     
     try:
         # 查询现有记录
-        existing = sb.table("ip_usage")\
-            .select("usage_count")\
-            .eq("ip_address", ip_address)\
-            .eq("month", month)\  # 修复：使用 month 字段
-            .execute()
+        existing = sb.table("ip_usage").select("usage_count").eq("ip_address", ip_address).eq("month", month).execute()
         
         if existing.data:
             # 更新现有记录
             new_count = existing.data[0]["usage_count"] + 1
-            sb.table("ip_usage")\
-                .update({
-                    "usage_count": new_count,
-                    "updated_at": datetime.now(timezone.utc).isoformat()
-                })\
-                .eq("ip_address", ip_address)\
-                .eq("month", month)\  # 修复：使用 month 字段
-                .execute()
+            sb.table("ip_usage").update({
+                "usage_count": new_count,
+                "updated_at": datetime.now(timezone.utc).isoformat()
+            }).eq("ip_address", ip_address).eq("month", month).execute()
             print(f"[DEBUG] increment_ip_usage 更新: ip={ip_address}, month={month}, new_count={new_count}")
         else:
             # 创建新记录
             sb.table("ip_usage").insert({
                 "ip_address": ip_address,
-                "month": month,  # 修复：使用 month 字段
+                "month": month,
                 "usage_count": 1,
                 "updated_at": datetime.now(timezone.utc).isoformat()
             }).execute()
@@ -314,23 +286,15 @@ def decrement_ip_usage(ip_address, month):
     
     try:
         # 查询现有记录
-        existing = sb.table("ip_usage")\
-            .select("usage_count")\
-            .eq("ip_address", ip_address)\
-            .eq("month", month)\  # 修复：使用 month 字段
-            .execute()
+        existing = sb.table("ip_usage").select("usage_count").eq("ip_address", ip_address).eq("month", month).execute()
         
         if existing.data and existing.data[0]["usage_count"] > 0:
             # 减少计数
             new_count = existing.data[0]["usage_count"] - 1
-            sb.table("ip_usage")\
-                .update({
-                    "usage_count": new_count,
-                    "updated_at": datetime.now(timezone.utc).isoformat()
-                })\
-                .eq("ip_address", ip_address)\
-                .eq("month", month)\  # 修复：使用 month 字段
-                .execute()
+            sb.table("ip_usage").update({
+                "usage_count": new_count,
+                "updated_at": datetime.now(timezone.utc).isoformat()
+            }).eq("ip_address", ip_address).eq("month", month).execute()
             print(f"[DEBUG] decrement_ip_usage 成功: ip={ip_address}, month={month}, new_count={new_count}")
         else:
             print(f"[DEBUG] decrement_ip_usage 无记录或计数已为0: ip={ip_address}, month={month}")
