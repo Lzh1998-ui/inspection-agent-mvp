@@ -2,6 +2,10 @@
 用户认证模块 - 基于 Supabase
 ================================
 如果未配置 Supabase，自动降级为本地 Session 模式（无持久化）
+
+修复说明（2026-06-25）：
+- 修复 ip_usage 表字段名不匹配问题（usage_month → month）
+- 添加调试输出，便于排查 IP 追踪失效问题
 """
 
 import streamlit as st
@@ -20,7 +24,8 @@ def get_supabase():
         if url and key and url != "https://your-project.supabase.co":
             return create_client(url, key)
         return None
-    except Exception:
+    except Exception as e:
+        print(f"[DEBUG] Supabase 客户端初始化失败: {e}")
         return None
 
 def is_supabase_configured():
@@ -59,7 +64,8 @@ def sign_up(email, password, display_name=""):
                     "inspection_count": 0,
                     "inspection_limit": 20
                 }).execute()
-            except Exception:
+            except Exception as e:
+                print(f"[DEBUG] 创建用户配置失败: {e}")
                 pass  # 可能已经存在
             
             return True, "注册成功！请检查邮箱确认链接（部分情况下可直接登录）"
@@ -108,7 +114,8 @@ def sign_in(email, password):
                 else:
                     user_data["inspection_count"] = 0
                     user_data["inspection_limit"] = 20
-            except Exception:
+            except Exception as e:
+                print(f"[DEBUG] 获取用户配置失败: {e}")
                 user_data["inspection_count"] = 0
                 user_data["inspection_limit"] = 20
             
@@ -126,7 +133,8 @@ def sign_out():
     if sb:
         try:
             sb.auth.sign_out()
-        except Exception:
+        except Exception as e:
+            print(f"[DEBUG] 退出登录失败: {e}")
             pass
 
 def update_inspection_count(user_id, new_count):
@@ -144,7 +152,8 @@ def update_inspection_count(user_id, new_count):
             .eq("id", user_id)\
             .execute()
         return True
-    except Exception:
+    except Exception as e:
+        print(f"[DEBUG] 更新验货次数失败: {e}")
         return False
 
 def save_report(user_id, report_data):
@@ -161,7 +170,8 @@ def save_report(user_id, report_data):
             "created_at": datetime.now(timezone.utc).isoformat()
         }).execute()
         return True
-    except Exception:
+    except Exception as e:
+        print(f"[DEBUG] 保存报告失败: {e}")
         return False
 
 def get_reports(user_id, limit=10):
@@ -178,7 +188,8 @@ def get_reports(user_id, limit=10):
             .limit(limit)\
             .execute()
         return resp.data if resp.data else []
-    except Exception:
+    except Exception as e:
+        print(f"[DEBUG] 获取报告失败: {e}")
         return []
 
 def get_user_count(user_id):
@@ -194,86 +205,137 @@ def get_user_count(user_id):
             .execute()
         if resp.data:
             return resp.data[0].get("inspection_count", 0), resp.data[0].get("inspection_limit", 20)
-    except Exception:
+    except Exception as e:
+        print(f"[DEBUG] 获取用户次数失败: {e}")
         pass
     return 0, 20
 
 
 # ===== IP 追踪（防换浏览器/无痕模式白嫖）=====
+# 修复：字段名从 usage_month 改为 month（匹配 Supabase 表结构）
 
-def get_ip_usage(ip_address, usage_month):
-    """获取IP地址当月的使用次数"""
+def get_ip_usage(ip_address, month):
+    """
+    获取IP地址当月的使用次数
+    
+    参数:
+        ip_address: 客户端IP地址
+        month: 月份字符串（格式：YYYY-MM）
+    
+    返回: int（使用次数，查询失败返回0）
+    """
     sb = get_supabase()
     if not sb or not ip_address or ip_address == "unknown":
+        print(f"[DEBUG] get_ip_usage 跳过: sb={sb}, ip={ip_address}")
         return 0
     
     try:
         resp = sb.table("ip_usage")\
             .select("usage_count")\
             .eq("ip_address", ip_address)\
-            .eq("usage_month", usage_month)\
+            .eq("month", month)\  # 修复：使用 month 字段
             .execute()
+        
         if resp.data:
-            return resp.data[0].get("usage_count", 0)
+            count = resp.data[0].get("usage_count", 0)
+            print(f"[DEBUG] get_ip_usage 成功: ip={ip_address}, month={month}, count={count}")
+            return count
+        
+        print(f"[DEBUG] get_ip_usage 无记录: ip={ip_address}, month={month}")
         return 0
-    except Exception:
+    except Exception as e:
+        print(f"[DEBUG] get_ip_usage 失败: {e}")
         return 0
 
-def increment_ip_usage(ip_address, usage_month):
-    """增加IP地址当月使用次数"""
+def increment_ip_usage(ip_address, month):
+    """
+    增加IP地址当月使用次数
+    
+    参数:
+        ip_address: 客户端IP地址
+        month: 月份字符串（格式：YYYY-MM）
+    
+    返回: bool（是否成功）
+    """
     sb = get_supabase()
     if not sb or not ip_address or ip_address == "unknown":
+        print(f"[DEBUG] increment_ip_usage 跳过: sb={sb}, ip={ip_address}")
         return False
     
     try:
+        # 查询现有记录
         existing = sb.table("ip_usage")\
             .select("usage_count")\
             .eq("ip_address", ip_address)\
-            .eq("usage_month", usage_month)\
+            .eq("month", month)\  # 修复：使用 month 字段
             .execute()
         
         if existing.data:
+            # 更新现有记录
+            new_count = existing.data[0]["usage_count"] + 1
             sb.table("ip_usage")\
                 .update({
-                    "usage_count": existing.data[0]["usage_count"] + 1,
-                    "last_used": datetime.now(timezone.utc).isoformat()
+                    "usage_count": new_count,
+                    "updated_at": datetime.now(timezone.utc).isoformat()
                 })\
                 .eq("ip_address", ip_address)\
-                .eq("usage_month", usage_month)\
+                .eq("month", month)\  # 修复：使用 month 字段
                 .execute()
+            print(f"[DEBUG] increment_ip_usage 更新: ip={ip_address}, month={month}, new_count={new_count}")
         else:
+            # 创建新记录
             sb.table("ip_usage").insert({
                 "ip_address": ip_address,
-                "usage_month": usage_month,
+                "month": month,  # 修复：使用 month 字段
                 "usage_count": 1,
-                "last_used": datetime.now(timezone.utc).isoformat()
+                "updated_at": datetime.now(timezone.utc).isoformat()
             }).execute()
+            print(f"[DEBUG] increment_ip_usage 创建: ip={ip_address}, month={month}, count=1")
+        
         return True
-    except Exception:
+    except Exception as e:
+        print(f"[DEBUG] increment_ip_usage 失败: {e}")
         return False
 
-def decrement_ip_usage(ip_address, usage_month):
-    """减少IP地址当月使用次数（分析失败回退）"""
+def decrement_ip_usage(ip_address, month):
+    """
+    减少IP地址当月使用次数（分析失败回退）
+    
+    参数:
+        ip_address: 客户端IP地址
+        month: 月份字符串（格式：YYYY-MM）
+    
+    返回: bool（是否成功）
+    """
     sb = get_supabase()
     if not sb or not ip_address or ip_address == "unknown":
+        print(f"[DEBUG] decrement_ip_usage 跳过: sb={sb}, ip={ip_address}")
         return False
     
     try:
+        # 查询现有记录
         existing = sb.table("ip_usage")\
             .select("usage_count")\
             .eq("ip_address", ip_address)\
-            .eq("usage_month", usage_month)\
+            .eq("month", month)\  # 修复：使用 month 字段
             .execute()
         
         if existing.data and existing.data[0]["usage_count"] > 0:
+            # 减少计数
+            new_count = existing.data[0]["usage_count"] - 1
             sb.table("ip_usage")\
                 .update({
-                    "usage_count": existing.data[0]["usage_count"] - 1,
-                    "last_used": datetime.now(timezone.utc).isoformat()
+                    "usage_count": new_count,
+                    "updated_at": datetime.now(timezone.utc).isoformat()
                 })\
                 .eq("ip_address", ip_address)\
-                .eq("usage_month", usage_month)\
+                .eq("month", month)\  # 修复：使用 month 字段
                 .execute()
+            print(f"[DEBUG] decrement_ip_usage 成功: ip={ip_address}, month={month}, new_count={new_count}")
+        else:
+            print(f"[DEBUG] decrement_ip_usage 无记录或计数已为0: ip={ip_address}, month={month}")
+        
         return True
-    except Exception:
+    except Exception as e:
+        print(f"[DEBUG] decrement_ip_usage 失败: {e}")
         return False
