@@ -570,10 +570,7 @@ def show_auth_ui():
                     st.error(msg)
     
     st.markdown("---")
-    # 免登录体验
-    if st.button("免登录体验", use_container_width=True):
-        st.session_state["skip_login"] = True
-        st.rerun()
+    st.caption("不想注册？直接关闭此页面即可免费体验")
 def show_user_info():
     """显示已登录用户信息"""
     user = st.session_state.get("user")
@@ -593,8 +590,6 @@ if "total_savings" not in st.session_state:
     st.session_state["total_savings"] = 0
 if "user" not in st.session_state:
     st.session_state["user"] = None
-if "skip_login" not in st.session_state:
-    st.session_state["skip_login"] = False
 if "analysis_result" not in st.session_state:
     st.session_state["analysis_result"] = None
 if "analysis_error" not in st.session_state:
@@ -621,30 +616,7 @@ if "ip_usage_loaded" not in st.session_state:
     else:
         st.session_state["ip_usage_count"] = 0
 
-# ===== 处理未登录状态 =====
-if not st.session_state["user"] and not st.session_state["skip_login"]:
-    # 未登录：显示登录/注册页面
-    st.title("外贸验货AI Agent - MVP")
-    st.markdown("---")
-    col_auth1, col_auth2 = st.columns([1, 1])    
-    with col_auth1:
-        show_auth_ui()    
-    with col_auth2:
-        st.subheader("关于本应用")
-        st.info(
-            "上传产品照片 → AI自动分析缺陷 → 生成专业验货报告\n\n"
-            "**免费体验：** 每用户10次/月\n\n"
-            "**适用场景：**\n"
-            "- 外贸验货员\n"
-            "- 质检部门\n"
-            "- 供应商管理\n\n"
-            "**注册登录后可持久保存你的验货记录**"
-        )
-        
-        st.markdown("---")
-        st.caption(f"版本：0.3.2 (MVP) | Supabase状态：{'已连接' if supabase_ready else '未配置（次数不持久化）'}")  
-        st.stop()
-# ===== 已登录：显示主应用 =====
+# ===== 主应用界面 =====
 # 标题
 st.title("外贸验货AI Agent - MVP")
 st.markdown("---")
@@ -658,6 +630,11 @@ with st.sidebar:
     
     # 用户信息
     show_user_info()
+    
+    # 未登录用户可选登录
+    if not st.session_state.get("user"):
+        with st.expander("登录/注册（可选）"):
+            show_auth_ui()
     
     # 使用统计
     remaining = get_remaining()
@@ -688,7 +665,6 @@ with st.sidebar:
     if st.button("退出登录"):
         sign_out()
         st.session_state["user"] = None
-        st.session_state["skip_login"] = False
         st.session_state["inspection_history"] = []
         st.session_state["total_savings"] = 0
         st.rerun()
