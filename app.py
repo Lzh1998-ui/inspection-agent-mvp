@@ -471,19 +471,50 @@ def save_usage_count(count):
         pass  # query_params 写入失败时静默处理
 
 def get_client_ip():
-    """获取客户端IP地址"""
+    """获取客户端公网IP地址（用于跨设备防白嫖）"""
+    import time
+    
+    # 方法1: 通过外部API获取真实公网IP（最可靠）
     try:
-        # Streamlit Cloud/Server 通过请求头获取
+        import urllib.request
+        with urllib.request.urlopen("https://api.ipify.org", timeout=3) as response:
+            ip = response.read().decode("utf-8")
+            if ip and ip != "127.0.0.1":
+                return ip
+    except:
+        pass
+    
+    # 方法2: 备用API
+    try:
+        import urllib.request
+        with urllib.request.urlopen("https://httpbin.org/ip", timeout=3) as response:
+            data = json.loads(response.read().decode("utf-8"))
+            ip = data.get("origin", "").split(",")[0].strip()
+            if ip and ip != "127.0.0.1":
+                return ip
+    except:
+        pass
+    
+    # 方法3: 尝试从headers获取（本地开发/Streamlit Cloud）
+    try:
         headers = st.context.headers
         forwarded = headers.get("X-Forwarded-For", "")
-        if forwarded:
+        if forwarded and forwarded != "127.0.0.1":
             return forwarded.split(",")[0].strip()
         real_ip = headers.get("X-Real-IP", "")
-        if real_ip:
+        if real_ip and real_ip != "127.0.0.1":
             return real_ip
-        return "unknown"
     except:
-        return "unknown"
+        pass
+    
+    # 方法4: 返回一个基于浏览器的唯一ID（同一浏览器至少保持一致）
+    if "client_id" not in st.session_state:
+        import hashlib
+        import random
+        st.session_state["client_id"] = hashlib.md5(
+            f"{time.time()}{random.random()}".encode()
+        ).hexdigest()[:16]
+    return f"browser_{st.session_state['client_id']}"
 
 def get_remaining():
     """获取当前用户剩余次数"""
