@@ -12,6 +12,20 @@ import base64
 import httpx
 import re
 
+# 导入认证和 IP 追踪函数
+from auth_helper import (
+    is_supabase_configured,
+    get_ip_usage,
+    increment_ip_usage,
+    decrement_ip_usage,
+    sign_in,
+    sign_up,
+    sign_out,
+    update_inspection_count,
+    save_report,
+    get_reports
+)
+
 def clean_json_string(s):
     """清理 JSON 字符串中的常见格式问题"""
     if not s:
