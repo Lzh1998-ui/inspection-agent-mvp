@@ -201,6 +201,7 @@ def get_user_count(user_id):
 def get_ip_usage(ip_address):
     """
     获取IP地址的总使用次数（永久累计）
+    修复：同一 IP 可能有多个月份的旧记录，需 SUM 累加
     
     参数:
         ip_address: 客户端IP地址
@@ -213,12 +214,15 @@ def get_ip_usage(ip_address):
         return 0
     
     try:
+        # 修复：从只取第一条改为 SUM 累加所有记录
+        # 这样即使旧数据有多个月份的记录，也能返回总使用次数
         resp = sb.table("ip_usage").select("usage_count").eq("ip_address", ip_address).execute()
         
         if resp.data:
-            count = resp.data[0].get("usage_count", 0)
-            print(f"[DEBUG] get_ip_usage 成功: ip={ip_address}, count={count}")
-            return count
+            # 累加所有记录（兼容旧数据中同一 IP 多月份的情况）
+            total = sum(record.get("usage_count", 0) for record in resp.data)
+            print(f"[DEBUG] get_ip_usage 成功: ip={ip_address}, 总计={total} ({len(resp.data)}条记录)")
+            return total
         
         print(f"[DEBUG] get_ip_usage 无记录: ip={ip_address}")
         return 0
