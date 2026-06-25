@@ -459,28 +459,20 @@ def analyze_product_images(uploaded_files, product_name, inspection_standard):
         return False, f"AI 分析过程发生未知错误：{str(e)}"
 # ===== 辅助函数 =====
 def load_usage_count():
-    """从 query_params 加载持久化的使用计数（按月重置）"""
-    this_month = datetime.now().strftime("%Y-%m")
-    
-    saved_month = st.query_params.get("monthly_usage_month", "")
-    saved_count = st.query_params.get("monthly_usage_count", "0")
+    """从 query_params 加载持久化的使用计数（永久累计，不重置）"""
+    saved_count = st.query_params.get("total_usage_count", "0")
     
     try:
         saved_count = int(saved_count)
     except:
         saved_count = 0
     
-    # 如果月份变了，重置计数
-    if saved_month != this_month:
-        saved_count = 0
-    
     return saved_count
 
 def save_usage_count(count):
-    """持久化使用计数到 query_params"""
+    """持久化使用计数到 query_params（永久累计）"""
     try:
-        st.query_params["monthly_usage_month"] = datetime.now().strftime("%Y-%m")
-        st.query_params["monthly_usage_count"] = str(count)
+        st.query_params["total_usage_count"] = str(count)
     except:
         pass  # query_params 写入失败时静默处理
 
@@ -652,8 +644,7 @@ if "ip_usage_loaded" not in st.session_state:
     st.session_state["ip_usage_loaded"] = True
     if supabase_ready:
         client_ip = get_client_ip()
-        this_month = datetime.now().strftime("%Y-%m")
-        ip_count = get_ip_usage(client_ip, this_month)
+        ip_count = get_ip_usage(client_ip)
         st.session_state["ip_usage_count"] = ip_count
         # 关键修复：本地计数取 max(本地, IP)，防止关闭重置
         st.session_state["inspection_count"] = max(st.session_state["inspection_count"], ip_count)
@@ -920,9 +911,8 @@ with col_btn2:
                 # 同步 IP 计数到 Supabase（防换浏览器）
                 if supabase_ready:
                     client_ip = get_client_ip()
-                    this_month = datetime.now().strftime("%Y-%m")
-                    increment_ip_usage(client_ip, this_month)
-                    st.session_state["ip_usage_count"] = get_ip_usage(client_ip, this_month)
+                    increment_ip_usage(client_ip)
+                    st.session_state["ip_usage_count"] = get_ip_usage(client_ip)
             if user and supabase_ready:
                 update_inspection_count(user["id"], user["inspection_count"])
             
@@ -943,9 +933,8 @@ with col_btn2:
                     # 回退 IP 计数
                     if supabase_ready:
                         client_ip = get_client_ip()
-                        this_month = datetime.now().strftime("%Y-%m")
-                        decrement_ip_usage(client_ip, this_month)
-                        st.session_state["ip_usage_count"] = get_ip_usage(client_ip, this_month)
+                        decrement_ip_usage(client_ip)
+                        st.session_state["ip_usage_count"] = get_ip_usage(client_ip)
                 
                 if user and supabase_ready:
                     update_inspection_count(user["id"], user["inspection_count"])
