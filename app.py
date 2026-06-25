@@ -703,7 +703,7 @@ with st.sidebar:
     if remaining <= 2:
         st.warning(f"剩余次数不多")
     
-    st.caption(f"每用户 {get_inspection_limit()} 次/月")
+    st.caption(f"每用户 {get_inspection_limit()} 次（永久）")
     
     # 安全信息（仅管理员可见）
     client_ip = get_client_ip()
@@ -901,10 +901,10 @@ st.markdown("---")
 
 if is_limit_reached():
     st.error(f"已达到使用次数限制（{get_inspection_limit()}次）")
-    st.info("请联系开发者增加次数")
+    st.info("试用次数已用完。升级到专业版解锁无限次验货 + 报告历史 + 优先支持")
 else:
     remaining = get_remaining()
-    st.info(f"您还有 **{remaining}** 次免费使用次数")
+    st.info(f"您还有 **{remaining}** 次免费使用次数（永久）")
 
 col_btn1, col_btn2, col_btn3 = st.columns([1, 2, 1])
 with col_btn2:
