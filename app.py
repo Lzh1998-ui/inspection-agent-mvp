@@ -981,6 +981,14 @@ if st.session_state.get("analysis_result"):
     st.session_state["inspection_history"].append(report_data)
     st.session_state["total_savings"] += report_data["savings"]
     
+    # 内存优化：限制历史记录最多 5 条，防止 OOM
+    if len(st.session_state["inspection_history"]) > 5:
+        st.session_state["inspection_history"] = st.session_state["inspection_history"][-5:]
+        st.session_state["total_savings"] = sum(r.get("savings", 0) for r in st.session_state["inspection_history"])
+    
+    # 内存优化：清理原始 AI 响应（可能很大）
+    st.session_state["last_raw_ai_response"] = None
+    
     # 保存到数据库
     user = st.session_state.get("user")
     if user and supabase_ready:
