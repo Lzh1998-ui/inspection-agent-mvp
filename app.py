@@ -477,8 +477,10 @@ def save_usage_count(count):
         pass  # query_params 写入失败时静默处理
 
 def get_client_ip():
-    """获取客户端公网IP地址（用于跨设备防白嫖）"""
+    """获取稳定的客户端标识（跨浏览器重启保持一致）"""
     import time
+    import hashlib
+    import random
     
     # 方法1: 通过外部API获取真实公网IP（最可靠）
     try:
@@ -486,6 +488,11 @@ def get_client_ip():
         with urllib.request.urlopen("https://api.ipify.org", timeout=3) as response:
             ip = response.read().decode("utf-8")
             if ip and ip != "127.0.0.1":
+                # 验证成功：同时保存到 query_params 备份（防止后续获取失败）
+                try:
+                    st.query_params["_real_ip"] = ip
+                except:
+                    pass
                 return ip
     except:
         pass
@@ -497,6 +504,10 @@ def get_client_ip():
             data = json.loads(response.read().decode("utf-8"))
             ip = data.get("origin", "").split(",")[0].strip()
             if ip and ip != "127.0.0.1":
+                try:
+                    st.query_params["_real_ip"] = ip
+                except:
+                    pass
                 return ip
     except:
         pass
@@ -513,14 +524,25 @@ def get_client_ip():
     except:
         pass
     
-    # 方法4: 返回一个基于浏览器的唯一ID（同一浏览器至少保持一致）
-    if "client_id" not in st.session_state:
-        import hashlib
-        import random
-        st.session_state["client_id"] = hashlib.md5(
-            f"{time.time()}{random.random()}".encode()
-        ).hexdigest()[:16]
-    return f"browser_{st.session_state['client_id']}"
+    # 方法4: Fallback - 使用 query_params 持久化的 client_id
+    # 【关键修复】之前用 session_state，关闭浏览器后丢失
+    # 现在用 query_params，URL 里的参数在浏览器重启后仍然保留
+    try:
+        query_params = st.query_params
+        if "_client_id" in query_params:
+            return f"browser_{query_params['_client_id']}"
+    except:
+        pass
+    
+    # 第一次访问（或者 query_params 读取失败）: 生成新ID并持久化
+    new_id = hashlib.md5(
+        f"{time.time()}{random.random()}".encode()
+    ).hexdigest()[:16]
+    try:
+        st.query_params["_client_id"] = new_id
+    except:
+        pass
+    return f"browser_{new_id}"
 
 def get_remaining():
     """获取当前用户剩余次数"""
