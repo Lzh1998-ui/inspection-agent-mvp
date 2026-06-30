@@ -23,11 +23,6 @@ from auth_helper import (
     sign_out,
     resend_verification_email,
     check_email_verified,
-    is_ip_blocked,
-    block_ip,
-    unblock_ip,
-    get_blacklist,
-    detect_suspicious_ip_patterns,
     update_inspection_count,
     save_report,
     get_reports
