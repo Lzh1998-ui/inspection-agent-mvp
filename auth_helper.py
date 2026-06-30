@@ -303,3 +303,140 @@ def decrement_ip_usage(ip_address):
     except Exception as e:
         print(f"[DEBUG] decrement_ip_usage 失败: {e}")
         return False
+
+
+# ===== IP 黑名单（防滥用远程控制）=====
+
+def is_ip_blocked(ip_address):
+    """
+    检查 IP 是否在黑名单中
+    
+    参数:
+        ip_address: 客户端IP地址
+    
+    返回: bool（True=已封禁，False=未封禁）
+    """
+    sb = get_supabase()
+    if not sb or not ip_address or ip_address == "unknown":
+        return False
+    
+    try:
+        resp = sb.table("ip_blacklist").select("ip_address, reason").eq("ip_address", ip_address).execute()
+        if resp.data:
+            reason = resp.data[0].get("reason", "访问受限")
+            print(f"[DEBUG] IP 已被封禁: {ip_address}, 原因: {reason}")
+            return True
+        return False
+    except Exception as e:
+        # 表不存在或其他错误，不拦截
+        print(f"[DEBUG] 检查黑名单失败: {e}")
+        return False
+
+def block_ip(ip_address, reason="异常使用模式"):
+    """
+    封禁 IP（管理员手动调用，或在应用内调用）
+    
+    参数:
+        ip_address: 要封禁的 IP
+        reason: 封禁原因
+    
+    返回: bool
+    """
+    sb = get_supabase()
+    if not sb or not ip_address or ip_address == "unknown":
+        return False
+    
+    try:
+        # 使用 upsert 避免重复
+        sb.table("ip_blacklist").upsert({
+            "ip_address": ip_address,
+            "reason": reason,
+            "blocked_at": datetime.now(timezone.utc).isoformat()
+        }).execute()
+        print(f"[DEBUG] IP 已封禁: {ip_address}, 原因: {reason}")
+        return True
+    except Exception as e:
+        print(f"[DEBUG] 封禁失败: {e}")
+        return False
+
+def unblock_ip(ip_address):
+    """解封 IP"""
+    sb = get_supabase()
+    if not sb:
+        return False
+    try:
+        sb.table("ip_blacklist").delete().eq("ip_address", ip_address).execute()
+        print(f"[DEBUG] IP 已解封: {ip_address}")
+        return True
+    except Exception as e:
+        print(f"[DEBUG] 解封失败: {e}")
+        return False
+
+def get_blacklist():
+    """获取所有黑名单记录"""
+    sb = get_supabase()
+    if not sb:
+        return []
+    try:
+        resp = sb.table("ip_blacklist").select("*").order("blocked_at", desc=True).execute()
+        return resp.data if resp.data else []
+    except Exception as e:
+        print(f"[DEBUG] 获取黑名单失败: {e}")
+        return []
+
+
+# ===== 恶意使用模式检测 =====
+
+def detect_suspicious_ip_patterns():
+    """
+    检测异常使用模式：
+    1. 同一个 IP 在极短时间内（1小时内）使用次数过多
+    2. 多个 IP 在同一小时段内都被更新（可能同一人换了多个IP）
+    
+    返回: list of dict，包含可疑IP及其原因
+    """
+    sb = get_supabase()
+    if not sb:
+        return []
+    
+    suspicious = []
+    try:
+        # 检测 1: 1 小时内使用超过 8 次的 IP（异常快）
+        resp = sb.table("ip_usage")\
+            .select("ip_address, usage_count, updated_at")\
+            .gte("updated_at", (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat())\
+            .execute()
+        
+        if resp.data:
+            for record in resp.data:
+                usage = record.get("usage_count", 0)
+                if usage >= 8:  # 1小时内用了8次（接近上限）
+                    suspicious.append({
+                        "ip_address": record["ip_address"],
+                        "reason": f"1小时内使用{usage}次，接近上限",
+                        "severity": "high" if usage >= 10 else "medium"
+                    })
+        
+        # 检测 2: 1小时内创建了多条不同 IP 的记录（可能换 IP 刷）
+        # 通过时间窗口分组
+        if resp.data:
+            one_hour_ago = datetime.now(timezone.utc) - timedelta(hours=1)
+            recent_ips = set()
+            for record in resp.data:
+                updated = record.get("updated_at", "")
+                if updated and updated > one_hour_ago.isoformat():
+                    recent_ips.add(record["ip_address"])
+            
+            # 如果 1 小时内有 3+ 个不同 IP 都被使用，可能是同一人换 IP
+            if len(recent_ips) >= 3:
+                for ip in recent_ips:
+                    suspicious.append({
+                        "ip_address": ip,
+                        "reason": f"1小时内检测到{len(recent_ips)}个不同IP同时活跃",
+                        "severity": "high"
+                    })
+        
+        return suspicious
+    except Exception as e:
+        print(f"[DEBUG] 检测异常模式失败: {e}")
+        return []
