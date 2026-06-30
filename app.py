@@ -548,30 +548,10 @@ def get_client_ip():
 
 def check_ip_blacklist():
     """
-    检查当前 IP 是否在黑名单中，如果在则阻止访问
-    
-    应在页面主逻辑运行前调用（放在 st.set_page_config 之后、主内容之前）
+    检查当前 IP 是否在黑名单中（功能暂未启用）
     """
-    if not is_supabase_configured():
-        return  # 未配置 Supabase，跳过检查
-    
-    client_ip = get_client_ip()
-    if client_ip == "unknown":
-        return
-    
-    if is_ip_blocked(client_ip):
-        st.error("访问受限")
-        st.markdown("---")
-        st.warning("""
-        您的访问已被限制。
-        
-        可能原因：
-        - 使用了非正常网络环境（频繁更换IP）
-        - 违反了使用条款
-        
-        如需恢复访问，请联系开发者。
-        """)
-        st.stop()  # 停止执行后续代码
+    # 黑名单功能暂未实现，直接返回
+    return
 
 def get_remaining():
     """获取当前用户剩余次数"""
