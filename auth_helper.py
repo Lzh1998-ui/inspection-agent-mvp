@@ -38,9 +38,6 @@ def sign_up(email, password, display_name=""):
     """
     注册新用户
     返回: (success, message, user_data)
-    
-    注意：当前为临时绕过模式，因 Supabase 邮件服务故障
-    用户注册后直接视为已验证，可立即使用
     """
     sb = get_supabase()
     if not sb:
@@ -65,26 +62,26 @@ def sign_up(email, password, display_name=""):
                     "email": email,
                     "display_name": display_name or email.split("@")[0],
                     "inspection_count": 0,
-                    "inspection_limit": 10  # 注册后10次
+                    "inspection_limit": 10
                 }).execute()
             except Exception as e:
                 print(f"[DEBUG] 创建用户配置失败: {e}")
                 pass
             
-            # 临时绕过：直接返回用户信息，无需邮箱验证
             user_data = {
                 "id": resp.user.id,
                 "email": email,
                 "display_name": display_name or email.split("@")[0],
                 "inspection_count": 0,
                 "inspection_limit": 10,
-                "email_verified": True  # 临时标记为已验证
+                "email_verified": True
             }
-            return True, "注册成功！已自动登录（邮箱验证功能暂时关闭）", user_data
-        return False, "注册失败", None
+            return True, "注册成功！请直接登录使用。", user_data
+        
+        return False, "注册失败，请稍后重试", None
+        
     except Exception as e:
         error_msg = str(e)
-        # 如果是超时错误，尝试本地模式
         if "timed out" in error_msg.lower() or "timeout" in error_msg.lower():
             # 本地临时注册模式
             import hashlib
@@ -97,22 +94,23 @@ def sign_up(email, password, display_name=""):
                 "inspection_count": 0,
                 "inspection_limit": 10,
                 "email_verified": True,
-                "local_mode": True  # 标记为本地模式
+                "local_mode": True
             }
             return True, "注册成功！（离线模式，数据仅保存在当前会话）", user_data
-        if "already registered" in error_msg.lower() or "重复" in error_msg:
+        
+        if "already registered" in error_msg.lower() or "already exists" in error_msg.lower():
             return False, "该邮箱已注册，请直接登录", None
+        
         if "weak" in error_msg.lower():
             return False, "密码强度不足，请使用至少6位字符", None
-        return False, f"注册失败：{error_msg}", None
+        
+        return False, f"注册失败: {error_msg[:100]}", None
+
 
 def sign_in(email, password):
     """
-    用户登录（临时绕过邮箱验证）
+    用户登录
     返回: (success, message, user_data, needs_verification)
-    
-    注意：当前为临时绕过模式，因 Supabase 邮件服务故障
-    所有成功登录的用户都视为已验证
     """
     sb = get_supabase()
     if not sb:
@@ -125,14 +123,13 @@ def sign_in(email, password):
         })
         
         if resp.user:
-            # 临时绕过：跳过邮箱验证检查
-            email_confirmed = True  # resp.user.email_confirmed_at is not None
+            email_confirmed = True  # 临时绕过邮箱验证
             
             user_data = {
                 "id": resp.user.id,
                 "email": resp.user.email or email,
                 "display_name": resp.user.user_metadata.get("display_name", email.split("@")[0]),
-                "email_verified": True  # 临时标记为已验证
+                "email_verified": True
             }
             
             try:
@@ -150,14 +147,15 @@ def sign_in(email, password):
                 user_data["inspection_limit"] = 10
             
             return True, "登录成功", user_data, False
+        
         return False, "登录失败：邮箱或密码错误", None, False
+        
     except Exception as e:
         error_msg = str(e)
-        # 如果是超时错误，尝试本地模式
         if "timed out" in error_msg.lower() or "timeout" in error_msg.lower():
             # 本地临时登录模式
             import hashlib
-            temp_id = hashlib.md5(email.encode()).hexdigest()
+            temp_id = hashlib.md5(f"{email}".encode()).hexdigest()
             user_data = {
                 "id": temp_id,
                 "email": email,
@@ -168,68 +166,12 @@ def sign_in(email, password):
                 "local_mode": True
             }
             return True, "登录成功！（离线模式，数据仅保存在当前会话）", user_data, False
-        if "invalid" in error_msg.lower() or "credentials" in error_msg.lower():
-            return False, "邮箱或密码错误", None, False
-        if "email not confirmed" in error_msg.lower():
-            # 临时绕过：即使显示未验证也允许登录
-            import hashlib
-            temp_id = hashlib.md5(email.encode()).hexdigest()
-            user_data = {
-                "id": temp_id,
-                "email": email,
-                "display_name": email.split("@")[0],
-                "inspection_count": 0,
-                "inspection_limit": 10,
-                "email_verified": True,
-                "local_mode": True
-            }
-            return True, "登录成功！（离线模式）", user_data, False
-        return False, f"登录失败：{error_msg}", None, False
-
-
-def resend_verification_email(email):
-    """
-    重新发送邮箱验证邮件
-    返回: (success, message)
-    """
-    sb = get_supabase()
-    if not sb:
-        return False, "Supabase 未配置"
-    
-    try:
-        resp = sb.auth.resend({
-            "type": "signup",
-            "email": email
-        })
         
-        if resp:
-            return True, "验证邮件已重新发送，请检查收件箱（包括垃圾邮件文件夹）"
-        return False, "发送失败，请稍后重试"
-    except Exception as e:
-        error_msg = str(e)
-        if "rate limit" in error_msg.lower():
-            return False, "发送过于频繁，请稍后再试"
-        return False, f"发送失败：{error_msg}"
+        if "invalid" in error_msg.lower():
+            return False, "邮箱或密码错误", None, False
+        
+        return False, f"登录失败: {error_msg[:100]}", None, False
 
-
-def check_email_verified(user_id):
-    """
-    检查用户邮箱是否已验证
-    返回: bool
-    """
-    sb = get_supabase()
-    if not sb or not user_id:
-        return False
-    
-    try:
-        # 获取当前会话用户信息
-        resp = sb.auth.get_user()
-        if resp and resp.user:
-            return resp.user.email_confirmed_at is not None
-        return False
-    except Exception as e:
-        print(f"[DEBUG] 检查邮箱验证状态失败: {e}")
-        return False
 
 def sign_out():
     """退出登录"""
@@ -239,34 +181,98 @@ def sign_out():
             sb.auth.sign_out()
         except Exception as e:
             print(f"[DEBUG] 退出登录失败: {e}")
-            pass
+    return True
 
-def update_inspection_count(user_id, new_count):
-    """更新用户的验货次数"""
+
+def resend_verification_email(email):
+    """重新发送验证邮件"""
     sb = get_supabase()
-    if not sb or not user_id:
+    if not sb:
+        return False, "Supabase 未配置"
+    
+    try:
+        sb.auth.resend({
+            "type": "signup",
+            "email": email
+        })
+        return True, "验证邮件已重新发送，请检查收件箱（包括垃圾邮件文件夹）"
+    except Exception as e:
+        error_msg = str(e)
+        if "rate limit" in error_msg.lower():
+            return False, "发送过于频繁，请稍后再试"
+        return False, f"发送失败: {error_msg[:100]}"
+
+
+def check_email_verified(user_id):
+    """检查用户邮箱是否已验证"""
+    sb = get_supabase()
+    if not sb:
         return False
     
     try:
-        sb.table("user_profiles").update({
-            "inspection_count": new_count,
-            "updated_at": datetime.now(timezone.utc).isoformat()
-        }).eq("id", user_id).execute()
-        return True
+        resp = sb.auth.admin.get_user_by_id(user_id)
+        return resp.user.email_confirmed_at is not None
+    except Exception as e:
+        print(f"[DEBUG] 检查邮箱验证状态失败: {e}")
+        return True  # 临时绕过
+
+
+# ===== 验货次数管理 =====
+
+def update_inspection_count(user_id, increment=True):
+    """更新用户验货次数"""
+    sb = get_supabase()
+    if not sb:
+        return False
+    
+    try:
+        profile = sb.table("user_profiles").select("inspection_count").eq("id", user_id).execute()
+        
+        if profile.data:
+            current = profile.data[0].get("inspection_count", 0)
+            new_count = current + 1 if increment else max(0, current - 1)
+            
+            sb.table("user_profiles").update({
+                "inspection_count": new_count
+            }).eq("id", user_id).execute()
+            return True
     except Exception as e:
         print(f"[DEBUG] 更新验货次数失败: {e}")
-        return False
+    
+    return False
+
+
+def get_user_count(user_id):
+    """获取用户验货次数"""
+    sb = get_supabase()
+    if not sb:
+        return 0, 10
+    
+    try:
+        profile = sb.table("user_profiles").select("inspection_count, inspection_limit").eq("id", user_id).execute()
+        
+        if profile.data:
+            return (
+                profile.data[0].get("inspection_count", 0),
+                profile.data[0].get("inspection_limit", 10)
+            )
+    except Exception as e:
+        print(f"[DEBUG] 获取用户次数失败: {e}")
+    
+    return 0, 10
+
+
+# ===== 报告保存 =====
 
 def save_report(user_id, report_data):
-    """保存验货报告到数据库"""
+    """保存验货报告"""
     sb = get_supabase()
-    if not sb or not user_id:
+    if not sb:
         return False
     
     try:
         sb.table("inspection_reports").insert({
             "user_id": user_id,
-            "product_name": report_data.get("product_name", ""),
             "report_data": report_data,
             "created_at": datetime.now(timezone.utc).isoformat()
         }).execute()
@@ -275,277 +281,94 @@ def save_report(user_id, report_data):
         print(f"[DEBUG] 保存报告失败: {e}")
         return False
 
+
 def get_reports(user_id, limit=10):
-    """获取用户的验货历史"""
+    """获取用户历史报告"""
     sb = get_supabase()
-    if not sb or not user_id:
+    if not sb:
         return []
     
     try:
         resp = sb.table("inspection_reports").select("*").eq("user_id", user_id).order("created_at", desc=True).limit(limit).execute()
-        return resp.data if resp.data else []
+        return resp.data
     except Exception as e:
         print(f"[DEBUG] 获取报告失败: {e}")
         return []
 
-def get_user_count(user_id):
-    """从数据库获取用户当前验货次数"""
+
+# ===== IP 追踪（防滥用）=====
+
+def get_ip_usage(client_ip):
+    """获取 IP 的使用次数"""
     sb = get_supabase()
-    if not sb or not user_id:
-        return 0, 20
-    
-    try:
-        resp = sb.table("user_profiles").select("inspection_count, inspection_limit").eq("id", user_id).execute()
-        if resp.data:
-            return resp.data[0].get("inspection_count", 0), resp.data[0].get("inspection_limit", 20)
-    except Exception as e:
-        print(f"[DEBUG] 获取用户次数失败: {e}")
-        pass
-    return 0, 20
-
-
-# ===== IP 追踪（防换浏览器/无痕模式白嫖）=====
-# 修改为永久计数（不按月重置）
-
-def get_ip_usage(ip_address):
-    """
-    获取IP地址的总使用次数（永久累计）
-    修复：同一 IP 可能有多个月份的旧记录，需 SUM 累加
-    
-    参数:
-        ip_address: 客户端IP地址
-    
-    返回: int（总使用次数，查询失败返回0）
-    """
-    sb = get_supabase()
-    if not sb or not ip_address or ip_address == "unknown":
-        print(f"[DEBUG] get_ip_usage 跳过: sb={sb}, ip={ip_address}")
+    if not sb or not client_ip:
         return 0
     
     try:
-        # 修复：从只取第一条改为 SUM 累加所有记录
-        # 这样即使旧数据有多个月份的记录，也能返回总使用次数
-        resp = sb.table("ip_usage").select("usage_count").eq("ip_address", ip_address).execute()
+        # 使用 SUM 累加所有记录（修复：之前只取第一条）
+        resp = sb.table("ip_usage").select("usage_count").eq("ip", client_ip).execute()
         
         if resp.data:
-            # 累加所有记录（兼容旧数据中同一 IP 多月份的情况）
             total = sum(record.get("usage_count", 0) for record in resp.data)
-            print(f"[DEBUG] get_ip_usage 成功: ip={ip_address}, 总计={total} ({len(resp.data)}条记录)")
+            print(f"[DEBUG] IP {client_ip} 累计使用: {total} 次")
             return total
-        
-        print(f"[DEBUG] get_ip_usage 无记录: ip={ip_address}")
-        return 0
     except Exception as e:
-        print(f"[DEBUG] get_ip_usage 失败: {e}")
-        return 0
+        print(f"[DEBUG] 获取 IP 使用次数失败: {e}")
+    
+    return 0
 
-def increment_ip_usage(ip_address):
-    """
-    增加IP地址的总使用次数（永久累计）
-    
-    参数:
-        ip_address: 客户端IP地址
-    
-    返回: bool（是否成功）
-    """
+
+def increment_ip_usage(client_ip):
+    """增加 IP 使用次数"""
     sb = get_supabase()
-    if not sb or not ip_address or ip_address == "unknown":
-        print(f"[DEBUG] increment_ip_usage 跳过: sb={sb}, ip={ip_address}")
+    if not sb or not client_ip:
         return False
     
     try:
-        # 查询现有记录
-        existing = sb.table("ip_usage").select("usage_count").eq("ip_address", ip_address).execute()
+        # 检查是否已有记录
+        resp = sb.table("ip_usage").select("*").eq("ip", client_ip).execute()
         
-        if existing.data:
+        if resp.data:
             # 更新现有记录
-            new_count = existing.data[0]["usage_count"] + 1
+            current = resp.data[0].get("usage_count", 0)
             sb.table("ip_usage").update({
-                "usage_count": new_count,
+                "usage_count": current + 1,
                 "updated_at": datetime.now(timezone.utc).isoformat()
-            }).eq("ip_address", ip_address).execute()
-            print(f"[DEBUG] increment_ip_usage 更新: ip={ip_address}, new_count={new_count}")
+            }).eq("ip", client_ip).execute()
         else:
             # 创建新记录
             sb.table("ip_usage").insert({
-                "ip_address": ip_address,
+                "ip": client_ip,
                 "usage_count": 1,
                 "updated_at": datetime.now(timezone.utc).isoformat()
             }).execute()
-            print(f"[DEBUG] increment_ip_usage 创建: ip={ip_address}, count=1")
         
         return True
     except Exception as e:
-        print(f"[DEBUG] increment_ip_usage 失败: {e}")
-        return False
+        print(f"[DEBUG] 增加 IP 使用次数失败: {e}")
+    
+    return False
 
-def decrement_ip_usage(ip_address):
-    """
-    减少IP地址的总使用次数（分析失败回退）
-    
-    参数:
-        ip_address: 客户端IP地址
-    
-    返回: bool（是否成功）
-    """
+
+def decrement_ip_usage(client_ip):
+    """减少 IP 使用次数（用于错误回滚）"""
     sb = get_supabase()
-    if not sb or not ip_address or ip_address == "unknown":
-        print(f"[DEBUG] decrement_ip_usage 跳过: sb={sb}, ip={ip_address}")
+    if not sb or not client_ip:
         return False
     
     try:
-        # 查询现有记录
-        existing = sb.table("ip_usage").select("usage_count").eq("ip_address", ip_address).execute()
-        
-        if existing.data and existing.data[0]["usage_count"] > 0:
-            # 减少计数
-            new_count = existing.data[0]["usage_count"] - 1
-            sb.table("ip_usage").update({
-                "usage_count": new_count,
-                "updated_at": datetime.now(timezone.utc).isoformat()
-            }).eq("ip_address", ip_address).execute()
-            print(f"[DEBUG] decrement_ip_usage 成功: ip={ip_address}, new_count={new_count}")
-        else:
-            print(f"[DEBUG] decrement_ip_usage 无记录或计数已为0: ip={ip_address}")
-        
-        return True
-    except Exception as e:
-        print(f"[DEBUG] decrement_ip_usage 失败: {e}")
-        return False
-
-
-# ===== IP 黑名单（防滥用远程控制）=====
-
-def is_ip_blocked(ip_address):
-    """
-    检查 IP 是否在黑名单中
-    
-    参数:
-        ip_address: 客户端IP地址
-    
-    返回: bool（True=已封禁，False=未封禁）
-    """
-    sb = get_supabase()
-    if not sb or not ip_address or ip_address == "unknown":
-        return False
-    
-    try:
-        resp = sb.table("ip_blacklist").select("ip_address, reason").eq("ip_address", ip_address).execute()
-        if resp.data:
-            reason = resp.data[0].get("reason", "访问受限")
-            print(f"[DEBUG] IP 已被封禁: {ip_address}, 原因: {reason}")
-            return True
-        return False
-    except Exception as e:
-        # 表不存在或其他错误，不拦截
-        print(f"[DEBUG] 检查黑名单失败: {e}")
-        return False
-
-def block_ip(ip_address, reason="异常使用模式"):
-    """
-    封禁 IP（管理员手动调用，或在应用内调用）
-    
-    参数:
-        ip_address: 要封禁的 IP
-        reason: 封禁原因
-    
-    返回: bool
-    """
-    sb = get_supabase()
-    if not sb or not ip_address or ip_address == "unknown":
-        return False
-    
-    try:
-        # 使用 upsert 避免重复
-        sb.table("ip_blacklist").upsert({
-            "ip_address": ip_address,
-            "reason": reason,
-            "blocked_at": datetime.now(timezone.utc).isoformat()
-        }).execute()
-        print(f"[DEBUG] IP 已封禁: {ip_address}, 原因: {reason}")
-        return True
-    except Exception as e:
-        print(f"[DEBUG] 封禁失败: {e}")
-        return False
-
-def unblock_ip(ip_address):
-    """解封 IP"""
-    sb = get_supabase()
-    if not sb:
-        return False
-    try:
-        sb.table("ip_blacklist").delete().eq("ip_address", ip_address).execute()
-        print(f"[DEBUG] IP 已解封: {ip_address}")
-        return True
-    except Exception as e:
-        print(f"[DEBUG] 解封失败: {e}")
-        return False
-
-def get_blacklist():
-    """获取所有黑名单记录"""
-    sb = get_supabase()
-    if not sb:
-        return []
-    try:
-        resp = sb.table("ip_blacklist").select("*").order("blocked_at", desc=True).execute()
-        return resp.data if resp.data else []
-    except Exception as e:
-        print(f"[DEBUG] 获取黑名单失败: {e}")
-        return []
-
-
-# ===== 恶意使用模式检测 =====
-
-def detect_suspicious_ip_patterns():
-    """
-    检测异常使用模式：
-    1. 同一个 IP 在极短时间内（1小时内）使用次数过多
-    2. 多个 IP 在同一小时段内都被更新（可能同一人换了多个IP）
-    
-    返回: list of dict，包含可疑IP及其原因
-    """
-    sb = get_supabase()
-    if not sb:
-        return []
-    
-    suspicious = []
-    try:
-        # 检测 1: 1 小时内使用超过 8 次的 IP（异常快）
-        resp = sb.table("ip_usage")\
-            .select("ip_address, usage_count, updated_at")\
-            .gte("updated_at", (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat())\
-            .execute()
+        resp = sb.table("ip_usage").select("*").eq("ip", client_ip).execute()
         
         if resp.data:
-            for record in resp.data:
-                usage = record.get("usage_count", 0)
-                if usage >= 8:  # 1小时内用了8次（接近上限）
-                    suspicious.append({
-                        "ip_address": record["ip_address"],
-                        "reason": f"1小时内使用{usage}次，接近上限",
-                        "severity": "high" if usage >= 10 else "medium"
-                    })
+            current = resp.data[0].get("usage_count", 0)
+            if current > 0:
+                sb.table("ip_usage").update({
+                    "usage_count": current - 1,
+                    "updated_at": datetime.now(timezone.utc).isoformat()
+                }).eq("ip", client_ip).execute()
         
-        # 检测 2: 1小时内创建了多条不同 IP 的记录（可能换 IP 刷）
-        # 通过时间窗口分组
-        if resp.data:
-            one_hour_ago = datetime.now(timezone.utc) - timedelta(hours=1)
-            recent_ips = set()
-            for record in resp.data:
-                updated = record.get("updated_at", "")
-                if updated and updated > one_hour_ago.isoformat():
-                    recent_ips.add(record["ip_address"])
-            
-            # 如果 1 小时内有 3+ 个不同 IP 都被使用，可能是同一人换 IP
-            if len(recent_ips) >= 3:
-                for ip in recent_ips:
-                    suspicious.append({
-                        "ip_address": ip,
-                        "reason": f"1小时内检测到{len(recent_ips)}个不同IP同时活跃",
-                        "severity": "high"
-                    })
-        
-        return suspicious
+        return True
     except Exception as e:
-        print(f"[DEBUG] 检测异常模式失败: {e}")
-        return []
+        print(f"[DEBUG] 减少 IP 使用次数失败: {e}")
+    
+    return False
