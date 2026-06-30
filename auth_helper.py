@@ -80,12 +80,13 @@ def sign_up(email, password, display_name=""):
 
 def sign_in(email, password):
     """
-    用户登录
-    返回: (success, message, user_data)
+    用户登录（带邮箱验证检查）
+    返回: (success, message, user_data, needs_verification)
+    needs_verification: True 表示邮箱未验证，需要发送验证邮件
     """
     sb = get_supabase()
     if not sb:
-        return False, "Supabase 未配置", None
+        return False, "Supabase 未配置", None, False
     
     try:
         resp = sb.auth.sign_in_with_password({
@@ -94,11 +95,19 @@ def sign_in(email, password):
         })
         
         if resp.user:
+            # 检查邮箱是否已验证
+            email_confirmed = resp.user.email_confirmed_at is not None
+            
             user_data = {
                 "id": resp.user.id,
                 "email": resp.user.email or email,
-                "display_name": resp.user.user_metadata.get("display_name", email.split("@")[0])
+                "display_name": resp.user.user_metadata.get("display_name", email.split("@")[0]),
+                "email_verified": email_confirmed
             }
+            
+            # 如果邮箱未验证，返回特殊状态
+            if not email_confirmed:
+                return False, "邮箱未验证，请检查您的收件箱并点击验证链接", user_data, True
             
             try:
                 profile = sb.table("user_profiles").select("*").eq("id", resp.user.id).execute()
@@ -114,13 +123,60 @@ def sign_in(email, password):
                 user_data["inspection_count"] = 0
                 user_data["inspection_limit"] = 20
             
-            return True, "登录成功", user_data
-        return False, "登录失败：邮箱或密码错误", None
+            return True, "登录成功", user_data, False
+        return False, "登录失败：邮箱或密码错误", None, False
     except Exception as e:
         error_msg = str(e)
         if "invalid" in error_msg.lower() or "credentials" in error_msg.lower():
-            return False, "邮箱或密码错误", None
-        return False, f"登录失败：{error_msg}", None
+            return False, "邮箱或密码错误", None, False
+        if "email not confirmed" in error_msg.lower():
+            return False, "邮箱未验证，请检查您的收件箱", None, True
+        return False, f"登录失败：{error_msg}", None, False
+
+
+def resend_verification_email(email):
+    """
+    重新发送邮箱验证邮件
+    返回: (success, message)
+    """
+    sb = get_supabase()
+    if not sb:
+        return False, "Supabase 未配置"
+    
+    try:
+        resp = sb.auth.resend({
+            "type": "signup",
+            "email": email
+        })
+        
+        if resp:
+            return True, "验证邮件已重新发送，请检查收件箱（包括垃圾邮件文件夹）"
+        return False, "发送失败，请稍后重试"
+    except Exception as e:
+        error_msg = str(e)
+        if "rate limit" in error_msg.lower():
+            return False, "发送过于频繁，请稍后再试"
+        return False, f"发送失败：{error_msg}"
+
+
+def check_email_verified(user_id):
+    """
+    检查用户邮箱是否已验证
+    返回: bool
+    """
+    sb = get_supabase()
+    if not sb or not user_id:
+        return False
+    
+    try:
+        # 获取当前会话用户信息
+        resp = sb.auth.get_user()
+        if resp and resp.user:
+            return resp.user.email_confirmed_at is not None
+        return False
+    except Exception as e:
+        print(f"[DEBUG] 检查邮箱验证状态失败: {e}")
+        return False
 
 def sign_out():
     """退出登录"""
