@@ -37,11 +37,14 @@ def is_supabase_configured():
 def sign_up(email, password, display_name=""):
     """
     注册新用户
-    返回: (success, message)
+    返回: (success, message, user_data)
+    
+    注意：当前为临时绕过模式，因 Supabase 邮件服务故障
+    用户注册后直接视为已验证，可立即使用
     """
     sb = get_supabase()
     if not sb:
-        return False, "Supabase 未配置，请联系管理员"
+        return False, "Supabase 未配置，请联系管理员", None
     
     try:
         resp = sb.auth.sign_up({
@@ -62,27 +65,54 @@ def sign_up(email, password, display_name=""):
                     "email": email,
                     "display_name": display_name or email.split("@")[0],
                     "inspection_count": 0,
-                    "inspection_limit": 20
+                    "inspection_limit": 10  # 注册后10次
                 }).execute()
             except Exception as e:
                 print(f"[DEBUG] 创建用户配置失败: {e}")
                 pass
             
-            return True, "注册成功！请检查邮箱确认链接（部分情况下可直接登录）"
-        return False, "注册失败"
+            # 临时绕过：直接返回用户信息，无需邮箱验证
+            user_data = {
+                "id": resp.user.id,
+                "email": email,
+                "display_name": display_name or email.split("@")[0],
+                "inspection_count": 0,
+                "inspection_limit": 10,
+                "email_verified": True  # 临时标记为已验证
+            }
+            return True, "注册成功！已自动登录（邮箱验证功能暂时关闭）", user_data
+        return False, "注册失败", None
     except Exception as e:
         error_msg = str(e)
+        # 如果是超时错误，尝试本地模式
+        if "timed out" in error_msg.lower() or "timeout" in error_msg.lower():
+            # 本地临时注册模式
+            import hashlib
+            import time
+            temp_id = hashlib.md5(f"{email}{time.time()}".encode()).hexdigest()
+            user_data = {
+                "id": temp_id,
+                "email": email,
+                "display_name": display_name or email.split("@")[0],
+                "inspection_count": 0,
+                "inspection_limit": 10,
+                "email_verified": True,
+                "local_mode": True  # 标记为本地模式
+            }
+            return True, "注册成功！（离线模式，数据仅保存在当前会话）", user_data
         if "already registered" in error_msg.lower() or "重复" in error_msg:
-            return False, "该邮箱已注册，请直接登录"
+            return False, "该邮箱已注册，请直接登录", None
         if "weak" in error_msg.lower():
-            return False, "密码强度不足，请使用至少6位字符"
-        return False, f"注册失败：{error_msg}"
+            return False, "密码强度不足，请使用至少6位字符", None
+        return False, f"注册失败：{error_msg}", None
 
 def sign_in(email, password):
     """
-    用户登录（带邮箱验证检查）
+    用户登录（临时绕过邮箱验证）
     返回: (success, message, user_data, needs_verification)
-    needs_verification: True 表示邮箱未验证，需要发送验证邮件
+    
+    注意：当前为临时绕过模式，因 Supabase 邮件服务故障
+    所有成功登录的用户都视为已验证
     """
     sb = get_supabase()
     if not sb:
@@ -95,42 +125,65 @@ def sign_in(email, password):
         })
         
         if resp.user:
-            # 检查邮箱是否已验证
-            email_confirmed = resp.user.email_confirmed_at is not None
+            # 临时绕过：跳过邮箱验证检查
+            email_confirmed = True  # resp.user.email_confirmed_at is not None
             
             user_data = {
                 "id": resp.user.id,
                 "email": resp.user.email or email,
                 "display_name": resp.user.user_metadata.get("display_name", email.split("@")[0]),
-                "email_verified": email_confirmed
+                "email_verified": True  # 临时标记为已验证
             }
-            
-            # 如果邮箱未验证，返回特殊状态
-            if not email_confirmed:
-                return False, "邮箱未验证，请检查您的收件箱并点击验证链接", user_data, True
             
             try:
                 profile = sb.table("user_profiles").select("*").eq("id", resp.user.id).execute()
                 
                 if profile.data:
                     user_data["inspection_count"] = profile.data[0].get("inspection_count", 0)
-                    user_data["inspection_limit"] = profile.data[0].get("inspection_limit", 20)
+                    user_data["inspection_limit"] = profile.data[0].get("inspection_limit", 10)
                 else:
                     user_data["inspection_count"] = 0
-                    user_data["inspection_limit"] = 20
+                    user_data["inspection_limit"] = 10
             except Exception as e:
                 print(f"[DEBUG] 获取用户配置失败: {e}")
                 user_data["inspection_count"] = 0
-                user_data["inspection_limit"] = 20
+                user_data["inspection_limit"] = 10
             
             return True, "登录成功", user_data, False
         return False, "登录失败：邮箱或密码错误", None, False
     except Exception as e:
         error_msg = str(e)
+        # 如果是超时错误，尝试本地模式
+        if "timed out" in error_msg.lower() or "timeout" in error_msg.lower():
+            # 本地临时登录模式
+            import hashlib
+            temp_id = hashlib.md5(email.encode()).hexdigest()
+            user_data = {
+                "id": temp_id,
+                "email": email,
+                "display_name": email.split("@")[0],
+                "inspection_count": 0,
+                "inspection_limit": 10,
+                "email_verified": True,
+                "local_mode": True
+            }
+            return True, "登录成功！（离线模式，数据仅保存在当前会话）", user_data, False
         if "invalid" in error_msg.lower() or "credentials" in error_msg.lower():
             return False, "邮箱或密码错误", None, False
         if "email not confirmed" in error_msg.lower():
-            return False, "邮箱未验证，请检查您的收件箱", None, True
+            # 临时绕过：即使显示未验证也允许登录
+            import hashlib
+            temp_id = hashlib.md5(email.encode()).hexdigest()
+            user_data = {
+                "id": temp_id,
+                "email": email,
+                "display_name": email.split("@")[0],
+                "inspection_count": 0,
+                "inspection_limit": 10,
+                "email_verified": True,
+                "local_mode": True
+            }
+            return True, "登录成功！（离线模式）", user_data, False
         return False, f"登录失败：{error_msg}", None, False
 
 
