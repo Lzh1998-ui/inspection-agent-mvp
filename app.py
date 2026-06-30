@@ -21,6 +21,8 @@ from auth_helper import (
     sign_in,
     sign_up,
     sign_out,
+    resend_verification_email,
+    check_email_verified,
     is_ip_blocked,
     block_ip,
     unblock_ip,
@@ -633,12 +635,23 @@ def show_auth_ui():
             if not login_email or not login_password:
                 st.error("请填写邮箱和密码")
             else:
-                success, msg, user_data = sign_in(login_email, login_password)
+                success, msg, user_data, needs_verification = sign_in(login_email, login_password)
                 if success:
                     st.session_state["user"] = user_data
                     st.rerun()
                 else:
-                    st.error(msg)
+                    # 邮箱未验证的情况
+                    if needs_verification and user_data:
+                        st.error(msg)
+                        st.info("📧 验证邮件已发送到您的邮箱，请检查收件箱（包括垃圾邮件文件夹）")
+                        if st.button("重新发送验证邮件", key="resend_verify"):
+                            resend_success, resend_msg = resend_verification_email(login_email)
+                            if resend_success:
+                                st.success(resend_msg)
+                            else:
+                                st.error(resend_msg)
+                    else:
+                        st.error(msg)
     
     with tab2:
         reg_email = st.text_input("邮箱", key="reg_email", placeholder="your@email.com")
@@ -657,6 +670,7 @@ def show_auth_ui():
                 success, msg = sign_up(reg_email, reg_password, reg_name)
                 if success:
                     st.success(msg)
+                    st.info("📧 请检查您的邮箱并点击验证链接完成注册。验证后才能登录使用。")
                 else:
                     st.error(msg)
     
