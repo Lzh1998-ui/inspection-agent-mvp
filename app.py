@@ -640,18 +640,7 @@ def show_auth_ui():
                     st.session_state["user"] = user_data
                     st.rerun()
                 else:
-                    # 邮箱未验证的情况
-                    if needs_verification and user_data:
-                        st.error(msg)
-                        st.info("📧 验证邮件已发送到您的邮箱，请检查收件箱（包括垃圾邮件文件夹）")
-                        if st.button("重新发送验证邮件", key="resend_verify"):
-                            resend_success, resend_msg = resend_verification_email(login_email)
-                            if resend_success:
-                                st.success(resend_msg)
-                            else:
-                                st.error(resend_msg)
-                    else:
-                        st.error(msg)
+                    st.error(msg)
     
     with tab2:
         reg_email = st.text_input("邮箱", key="reg_email", placeholder="your@email.com")
@@ -667,15 +656,20 @@ def show_auth_ui():
             elif len(reg_password) < 6:
                 st.error("密码至少6位")
             else:
-                success, msg = sign_up(reg_email, reg_password, reg_name)
+                success, msg, user_data = sign_up(reg_email, reg_password, reg_name)
                 if success:
                     st.success(msg)
-                    st.info("📧 请检查您的邮箱并点击验证链接完成注册。验证后才能登录使用。")
+                    # 临时绕过：直接登录
+                    if user_data:
+                        st.session_state["user"] = user_data
+                        st.info("✅ 已自动登录，可以开始使用了！")
+                        st.balloons()
+                        st.rerun()
                 else:
                     st.error(msg)
     
     st.markdown("---")
-    st.caption("不想注册？直接关闭此页面即可免费体验")
+    st.caption("💡 提示：因邮件服务维护，邮箱验证暂时关闭，注册后即可直接使用")
 def show_user_info():
     """显示已登录用户信息"""
     user = st.session_state.get("user")
