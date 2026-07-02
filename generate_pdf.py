@@ -1,271 +1,257 @@
 """
-PDF报告生成模块
-使用reportlab生成专业验货报告，支持中文字体
+PDF 生成模块 - 外贸验货报告
+支持中文、图片嵌入、水印
 """
 
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import cm
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image
-from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image, Table, TableStyle
 from reportlab.lib import colors
+from reportlab.lib.enums import TA_CENTER, TA_LEFT
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
-from io import BytesIO
+from reportlab.lib.colors import Color
 import os
-from datetime import datetime, timezone, timedelta
+from io import BytesIO
+from PIL import Image as PILImage
 
-# ===== 北京时间 =====
-_BJ_TZ = timezone(timedelta(hours=8))
+# 尝试注册中文字体
+FONT_AVAILABLE = False
+FONT_PATHS = [
+    "C:/Windows/Fonts/simhei.ttf",  # 黑体
+    "C:/Windows/Fonts/simsun.ttc",  # 宋体
+    "C:/Windows/Fonts/msyh.ttc",    # 微软雅黑
+]
 
-def now_bj():
-    """获取当前北京时间"""
-    return datetime.now(_BJ_TZ)
+for path in FONT_PATHS:
+    if os.path.exists(path):
+        try:
+            pdfmetrics.registerFont(TTFont("Chinese", path))
+            FONT_AVAILABLE = True
+            break
+        except Exception:
+            continue
 
-# ===== 注册中文字体 =====
-def register_chinese_font():
-    """注册中文字体，如果不存在则使用默认字体"""
-    font_path = os.path.join(os.path.dirname(__file__), "fonts", "SimHei.ttf")
+def check_font_available():
+    """检查中文字体是否可用"""
+    return FONT_AVAILABLE
+
+def add_watermark(canvas, doc):
+    """
+    添加水印到每一页
+    水印内容："仅限内部使用"
+    样式：半透明斜体
+    """
+    canvas.saveState()
     
-    try:
-        if os.path.exists(font_path):
-            pdfmetrics.registerFont(TTFont("SimHei", font_path))
-            return "SimHei"
-        else:
-            # 尝试使用系统字体（Linux/Mac）
-            system_fonts = [
-                "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",  # Linux
-                "/System/Library/Fonts/PingFang.ttc",  # Mac
-                "C:\\Windows\\Fonts\\simhei.ttf",  # Windows
-            ]
-            for font in system_fonts:
-                if os.path.exists(font):
-                    pdfmetrics.registerFont(TTFont("Chinese", font))
-                    return "Chinese"
-            
-            # 如果都没有，返回None（后续用ASCII替代）
-            return None
-    except Exception as e:
-        print(f"字体加载失败: {e}")
-        return None
+    # 设置字体（斜体）
+    if FONT_AVAILABLE:
+        try:
+            canvas.setFont("Chinese", 60)
+        except Exception:
+            canvas.setFont("Helvetica-BoldOblique", 60)
+    else:
+        canvas.setFont("Helvetica-BoldOblique", 60)
+    
+    # 设置浅灰色模拟半透明效果
+    canvas.setFillColorRGB(0.85, 0.85, 0.85)
+    
+    # 旋转画布 45 度
+    canvas.rotate(45)
+    
+    # 在页面对角线位置绘制水印
+    x = -300
+    y = -100
+    
+    # 绘制多行水印，覆盖整个页面
+    for i in range(-2, 3):
+        for j in range(-2, 3):
+            canvas.drawString(x + i * 300, y + j * 200, "仅限内部使用")
+    
+    canvas.restoreState()
 
-# ===== 生成PDF报告 =====
 def generate_inspection_pdf(report_data, uploaded_files):
     """
-    生成验货报告PDF
+    生成验货报告 PDF
     
-    Args:
-        report_data: dict，包含报告信息
-        uploaded_files: list，上传的图片文件列表
+    参数:
+        report_data: dict, 报告数据
+        uploaded_files: list, 上传的图片文件列表
     
-    Returns:
-        BytesIO: PDF文件的二进制流
+    返回:
+        BytesIO: PDF 二进制数据
     """
     buffer = BytesIO()
+    
+    # 创建 PDF 文档
     doc = SimpleDocTemplate(
         buffer,
         pagesize=A4,
-        rightMargin=2*cm,
-        leftMargin=2*cm,
-        topMargin=2*cm,
-        bottomMargin=2*cm
+        rightMargin=2 * cm,
+        leftMargin=2 * cm,
+        topMargin=2 * cm,
+        bottomMargin=2 * cm
     )
-    
-    # 注册字体
-    chinese_font = register_chinese_font()
-    font_name = chinese_font if chinese_font else "Helvetica"
     
     # 样式
     styles = getSampleStyleSheet()
     
-    # 自定义样式（支持中文）
-    title_style = ParagraphStyle(
-        'ChineseTitle',
-        parent=styles['Heading1'],
-        fontName=font_name,
-        fontSize=18,
-        alignment=TA_CENTER,
-        spaceAfter=12,
-    )
+    if FONT_AVAILABLE:
+        title_style = ParagraphStyle(
+            "CustomTitle",
+            parent=styles["Heading1"],
+            fontName="Chinese",
+            fontSize=18,
+            alignment=TA_CENTER
+        )
+        
+        heading_style = ParagraphStyle(
+            "CustomHeading",
+            parent=styles["Heading2"],
+            fontName="Chinese",
+            fontSize=14
+        )
+        
+        normal_style = ParagraphStyle(
+            "CustomNormal",
+            parent=styles["Normal"],
+            fontName="Chinese",
+            fontSize=10
+        )
+    else:
+        title_style = styles["Heading1"]
+        heading_style = styles["Heading2"]
+        normal_style = styles["Normal"]
     
-    heading_style = ParagraphStyle(
-        'ChineseHeading',
-        parent=styles['Heading2'],
-        fontName=font_name,
-        fontSize=14,
-        spaceAfter=6,
-    )
-    
-    normal_style = ParagraphStyle(
-        'ChineseNormal',
-        parent=styles['Normal'],
-        fontName=font_name,
-        fontSize=10,
-        spaceAfter=6,
-    )
-    
-    # 故事（内容列表）
+    # 内容列表
     story = []
     
-    # ===== 第1页：标题 + 结论 =====
     # 标题
-    title_text = "外贸验货报告" if chinese_font else "Inspection Report"
-    story.append(Paragraph(title_text, title_style))
-    story.append(Spacer(1, 0.5*cm))
+    story.append(Paragraph("验货报告", title_style))
+    story.append(Spacer(1, 0.5 * cm))
     
-    # 基本信息表格
+    # 报告基本信息
     info_data = [
         ["报告编号", report_data.get("report_id", "N/A")],
-        ["验货日期", report_data.get("inspection_date", "N/A")],
         ["产品名称", report_data.get("product_name", "N/A")],
+        ["验货日期", report_data.get("inspection_date", "N/A")],
         ["验货标准", report_data.get("inspection_standard", "N/A")],
         ["订单数量", str(report_data.get("order_quantity", "N/A"))],
-        ["抽样数量", str(report_data.get("sample_size", "N/A"))],
+        ["抽样数量", str(report_data.get("sample_size", "N/A"))]
     ]
     
-    info_table = Table(info_data, colWidths=[4*cm, 8*cm])
-    info_table.setStyle(TableStyle([
-        ('FONTNAME', (0, 0), (-1, -1), font_name),
-        ('FONTSIZE', (0, 0), (-1, -1), 10),
-        ('BACKGROUND', (0, 0), (0, -1), colors.grey),
-        ('TEXTCOLOR', (0, 0), (0, -1), colors.whitesmoke),
-        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-        ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-        ('ROWBACKGROUNDS', (0, 0), (-1, -1), [colors.white, colors.lightgrey]),
-    ]))
+    if FONT_AVAILABLE:
+        info_table = Table(info_data, colWidths=[4 * cm, 10 * cm])
+        info_table.setStyle(TableStyle([
+            ("FONTNAME", (0, 0), (-1, -1), "Chinese"),
+            ("FONTSIZE", (0, 0), (-1, -1), 10),
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+            ("BACKGROUND", (0, 0), (0, -1), colors.lightgrey)
+        ]))
+    else:
+        info_table = Table(info_data, colWidths=[4 * cm, 10 * cm])
+        info_table.setStyle(TableStyle([
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+            ("BACKGROUND", (0, 0), (0, -1), colors.lightgrey)
+        ]))
     
     story.append(info_table)
-    story.append(Spacer(1, 0.5*cm))
+    story.append(Spacer(1, 0.5 * cm))
     
-    # 结论
-    conclusion_text = f"验货结论：{report_data.get('conclusion', 'N/A')}"
-    story.append(Paragraph(conclusion_text, heading_style))
+    # 验货结论
+    story.append(Paragraph("1. 验货结论", heading_style))
     
-    # 使用 AI 返回的建议（如果有的话）
-    recommendation = report_data.get('recommendation', '')
-    if recommendation:
-        suggestion_text = f"建议：{recommendation}"
+    conclusion = report_data.get("conclusion", "未知")
+    conclusion_color = colors.black
+    if "合格" in conclusion and "有条件" not in conclusion:
+        conclusion_color = colors.green
+    elif "不合格" in conclusion:
+        conclusion_color = colors.red
     else:
-        suggestion_text = "建议：无改进建议"
+        conclusion_color = colors.orange
     
-    if not chinese_font:
-        # 英文版本
-        recommendation_en = report_data.get('recommendation', '')
-        if recommendation_en:
-            suggestion_text = f"Recommendation: {recommendation_en}"
-        else:
-            suggestion_text = "Recommendation: No suggestion available"
+    conclusion_para = Paragraph(f"<b>结论：</b>{conclusion}", normal_style)
+    story.append(conclusion_para)
+    story.append(Spacer(1, 0.3 * cm))
     
-    story.append(Paragraph(suggestion_text, normal_style))
-    story.append(Spacer(1, 1*cm))
+    recommendation = report_data.get("recommendation", "暂无建议")
+    recommendation_para = Paragraph(f"<b>建议：</b>{recommendation}", normal_style)
+    story.append(recommendation_para)
+    story.append(Spacer(1, 0.5 * cm))
     
-    # ===== 第2页：缺陷清单 =====
-    story.append(Paragraph("缺陷清单", heading_style))
+    # 缺陷清单
+    story.append(Paragraph("2. 缺陷清单", heading_style))
     
-    if report_data.get("defects"):
-        defect_data = [["缺陷类型", "数量", "严重程度"]]
-        for defect in report_data["defects"]:
+    defects = report_data.get("defects", [])
+    if defects:
+        defect_data = [["序号", "缺陷类型", "数量", "严重程度"]]
+        
+        for idx, defect in enumerate(defects, 1):
             defect_data.append([
-                defect.get("type", "N/A"),
-                str(defect.get("quantity", "N/A")),
-                defect.get("severity", "N/A")
+                str(idx),
+                defect.get("type", "未知"),
+                str(defect.get("quantity", 0)),
+                defect.get("severity", "未知")
             ])
         
-        defect_table = Table(defect_data, colWidths=[4*cm, 3*cm, 3*cm])
-        defect_table.setStyle(TableStyle([
-            ('FONTNAME', (0, 0), (-1, -1), font_name),
-            ('FONTSIZE', (0, 0), (-1, -1), 10),
-            ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.lightgrey]),
-        ]))
+        if FONT_AVAILABLE:
+            defect_table = Table(defect_data, colWidths=[2 * cm, 5 * cm, 3 * cm, 4 * cm])
+            defect_table.setStyle(TableStyle([
+                ("FONTNAME", (0, 0), (-1, -1), "Chinese"),
+                ("FONTSIZE", (0, 0), (-1, -1), 10),
+                ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+                ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
+                ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE")
+            ]))
+        else:
+            defect_table = Table(defect_data, colWidths=[2 * cm, 5 * cm, 3 * cm, 4 * cm])
+            defect_table.setStyle(TableStyle([
+                ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+                ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
+                ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE")
+            ]))
         
         story.append(defect_table)
+    else:
+        story.append(Paragraph("未发现明显缺陷", normal_style))
     
-    story.append(Spacer(1, 1*cm))
+    story.append(Spacer(1, 0.5 * cm))
     
-    # ===== 第3页：照片附件 =====
-    story.append(Paragraph("照片附件", heading_style))
+    # 照片附件
+    story.append(Paragraph("3. 照片附件", heading_style))
     
-    # 插入图片（最多6张）
     if uploaded_files:
-        img_count = 0
-        img_row = []
-        
-        for img_file in uploaded_files[:6]:  # 最多6张
+        for idx, file in enumerate(uploaded_files, 1):
             try:
-                img_file.seek(0)
-                img = Image(img_file, width=5*cm, height=3.75*cm)  # 4:3比例
-                img_row.append(img)
-                img_count += 1
+                file.seek(0)
+                img = PILImage.open(file)
+                img_width, img_height = img.size
+                max_width = 16 * cm
+                ratio = max_width / img_width
+                new_width = max_width
+                new_height = img_height * ratio
                 
-                if img_count % 2 == 0 or img_count == len(uploaded_files[:6]):
-                    # 每行2张图片
-                    img_table = Table([img_row], colWidths=[6*cm, 6*cm])
-                    img_table.setStyle(TableStyle([
-                        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-                    ]))
-                    story.append(img_table)
-                    story.append(Spacer(1, 0.3*cm))
-                    img_row = []
+                img_buffer = BytesIO()
+                img.save(img_buffer, format="JPEG")
+                img_buffer.seek(0)
+                
+                img_obj = Image(img_buffer, width=new_width, height=new_height)
+                story.append(img_obj)
+                story.append(Spacer(1, 0.3 * cm))
+                
             except Exception as e:
-                print(f"图片插入失败: {e}")
+                print(f"图片处理失败: {e}")
                 continue
     
-    # ===== 页脚 =====
-    story.append(Spacer(1, 1*cm))
-    footer_text = f"报告生成时间：{now_bj().strftime('%Y-%m-%d %H:%M:%S')}"
-    if not chinese_font:
-        footer_text = f"Report generated: {now_bj().strftime('%Y-%m-%d %H:%M:%S')}"
-    
-    footer_style = ParagraphStyle(
-        'Footer',
-        parent=styles['Normal'],
-        fontName=font_name,
-        fontSize=8,
-        alignment=TA_CENTER,
-        textColor=colors.grey,
+    # 生成 PDF（带水印）
+    doc.build(
+        story,
+        onFirstPage=add_watermark,
+        onLaterPages=add_watermark
     )
-    story.append(Paragraph(footer_text, footer_style))
     
-    # 生成PDF
-    doc.build(story)
     buffer.seek(0)
-    
     return buffer
-
-# ===== 如果字体不存在，下载提示 =====
-def check_font_available():
-    """检查中文字体是否可用"""
-    font_path = os.path.join(os.path.dirname(__file__), "fonts", "SimHei.ttf")
-    return os.path.exists(font_path)
-
-if __name__ == "__main__":
-    # 测试
-    test_data = {
-        "report_id": "RPT-20240609-012345",
-        "product_name": "不锈钢保温杯",
-        "inspection_date": "2024-06-09",
-        "inspection_standard": "AQL 2.5",
-        "order_quantity": 500,
-        "sample_size": 50,
-        "conclusion": "⚠️ 有条件通过（Minor Defects）",
-        "defects": [
-            {"type": "划痕", "quantity": 3, "severity": "轻微","description": "表面有轻微划痕", "image": ""},
-            {"type": "标签错误", "quantity": 1, "severity": "中等","description": "产品标签信息错误", "image": ""},
-        ],
-        "recommendation": "改进包装，避免运输划痕"
-    }
-    
-    pdf_buffer = generate_inspection_pdf(test_data, [])
-    
-    with open("test_report.pdf", "wb") as f:
-        f.write(pdf_buffer.read())
-    
-    print("测试PDF已生成：test_report.pdf")
-
