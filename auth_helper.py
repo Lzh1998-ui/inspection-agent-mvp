@@ -529,3 +529,57 @@ def detect_suspicious_ip_patterns():
     except Exception as e:
         print(f"[DEBUG] 检测异常模式失败: {e}")
         return []
+
+# ===== 导出次数管理 =====
+
+def update_export_count(user_id, export_count):
+    """
+    更新用户导出次数（持久化到数据库）
+    
+    参数:
+        user_id: 用户ID
+        export_count: 新的导出次数
+    
+    返回: bool（成功/失败）
+    """
+    sb = get_supabase()
+    if not sb:
+        print("[DEBUG] Supabase 未配置，无法更新导出次数")
+        return False
+    
+    try:
+        # 尝试更新 user_profiles 表中的 export_count 字段
+        # 注意：需要先在 Supabase 中添加 export_count 字段
+        sb.table("user_profiles").update({
+            "export_count": export_count
+        }).eq("id", user_id).execute()
+        
+        print(f"[DEBUG] 更新导出次数成功: user_id={user_id}, export_count={export_count}")
+        return True
+    except Exception as e:
+        # 如果字段不存在，会报错
+        print(f"[DEBUG] 更新导出次数失败: {e}")
+        print("[DEBUG] 提示：需要在 Supabase 的 user_profiles 表中添加 export_count 字段")
+        return False
+
+def get_export_count(user_id):
+    """
+    获取用户导出次数
+    
+    参数:
+        user_id: 用户ID
+    
+    返回: int（导出次数，失败返回0）
+    """
+    sb = get_supabase()
+    if not sb:
+        return 0
+    
+    try:
+        resp = sb.table("user_profiles").select("export_count").eq("id", user_id).execute()
+        if resp.data:
+            return resp.data[0].get("export_count", 0)
+        return 0
+    except Exception as e:
+        print(f"[DEBUG] 获取导出次数失败: {e}")
+        return 0
