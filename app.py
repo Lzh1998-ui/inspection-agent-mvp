@@ -12,6 +12,22 @@ import base64
 import httpx
 import re
 
+# 导入认证和 IP 追踪函数
+from auth_helper import (
+    is_supabase_configured,
+    get_ip_usage,
+    increment_ip_usage,
+    decrement_ip_usage,
+    sign_in,
+    sign_up,
+    sign_out,
+    resend_verification_email,
+    check_email_verified,
+    update_inspection_count,
+    save_report,
+    get_reports
+)
+
 def clean_json_string(s):
     """清理 JSON 字符串中的常见格式问题"""
     if not s:
@@ -445,45 +461,97 @@ def analyze_product_images(uploaded_files, product_name, inspection_standard):
         return False, f"AI 分析过程发生未知错误：{str(e)}"
 # ===== 辅助函数 =====
 def load_usage_count():
-    """从 query_params 加载持久化的使用计数（按月重置）"""
-    this_month = datetime.now().strftime("%Y-%m")
-    
-    saved_month = st.query_params.get("monthly_usage_month", "")
-    saved_count = st.query_params.get("monthly_usage_count", "0")
+    """从 query_params 加载持久化的使用计数（永久累计，不重置）"""
+    saved_count = st.query_params.get("total_usage_count", "0")
     
     try:
         saved_count = int(saved_count)
     except:
         saved_count = 0
     
-    # 如果月份变了，重置计数
-    if saved_month != this_month:
-        saved_count = 0
-    
     return saved_count
 
 def save_usage_count(count):
-    """持久化使用计数到 query_params"""
+    """持久化使用计数到 query_params（永久累计）"""
     try:
-        st.query_params["monthly_usage_month"] = datetime.now().strftime("%Y-%m")
-        st.query_params["monthly_usage_count"] = str(count)
+        st.query_params["total_usage_count"] = str(count)
     except:
         pass  # query_params 写入失败时静默处理
 
 def get_client_ip():
-    """获取客户端IP地址"""
+    """获取稳定的客户端标识（跨浏览器重启保持一致）"""
+    import time
+    import hashlib
+    import random
+    
+    # 方法1: 通过外部API获取真实公网IP（最可靠）
     try:
-        # Streamlit Cloud/Server 通过请求头获取
+        import urllib.request
+        with urllib.request.urlopen("https://api.ipify.org", timeout=3) as response:
+            ip = response.read().decode("utf-8")
+            if ip and ip != "127.0.0.1":
+                # 验证成功：同时保存到 query_params 备份（防止后续获取失败）
+                try:
+                    st.query_params["_real_ip"] = ip
+                except:
+                    pass
+                return ip
+    except:
+        pass
+    
+    # 方法2: 备用API
+    try:
+        import urllib.request
+        with urllib.request.urlopen("https://httpbin.org/ip", timeout=3) as response:
+            data = json.loads(response.read().decode("utf-8"))
+            ip = data.get("origin", "").split(",")[0].strip()
+            if ip and ip != "127.0.0.1":
+                try:
+                    st.query_params["_real_ip"] = ip
+                except:
+                    pass
+                return ip
+    except:
+        pass
+    
+    # 方法3: 尝试从headers获取（本地开发/Streamlit Cloud）
+    try:
         headers = st.context.headers
         forwarded = headers.get("X-Forwarded-For", "")
-        if forwarded:
+        if forwarded and forwarded != "127.0.0.1":
             return forwarded.split(",")[0].strip()
         real_ip = headers.get("X-Real-IP", "")
-        if real_ip:
+        if real_ip and real_ip != "127.0.0.1":
             return real_ip
-        return "unknown"
     except:
-        return "unknown"
+        pass
+    
+    # 方法4: Fallback - 使用 query_params 持久化的 client_id
+    # 【关键修复】之前用 session_state，关闭浏览器后丢失
+    # 现在用 query_params，URL 里的参数在浏览器重启后仍然保留
+    try:
+        query_params = st.query_params
+        if "_client_id" in query_params:
+            return f"browser_{query_params['_client_id']}"
+    except:
+        pass
+    
+    # 第一次访问（或者 query_params 读取失败）: 生成新ID并持久化
+    new_id = hashlib.md5(
+        f"{time.time()}{random.random()}".encode()
+    ).hexdigest()[:16]
+    try:
+        st.query_params["_client_id"] = new_id
+    except:
+        pass
+    return f"browser_{new_id}"
+
+def check_ip_blacklist():
+    """
+    检查当前 IP 是否在黑名单中（功能暂未启用）
+    """
+    # 黑名单功能暂未实现，直接返回
+    return
 
 def get_remaining():
     """获取当前用户剩余次数"""
@@ -542,12 +610,20 @@ def show_auth_ui():
             if not login_email or not login_password:
                 st.error("请填写邮箱和密码")
             else:
-                success, msg, user_data = sign_in(login_email, login_password)
+                success, msg, user_data, needs_verification = sign_in(login_email, login_password)
                 if success:
                     st.session_state["user"] = user_data
                     st.rerun()
                 else:
                     st.error(msg)
+                    if needs_verification:
+                        st.info("📧 您的邮箱还未验证，请查收验证邮件（包括垃圾邮件文件夹）")
+                        if st.button("🔄 没收到？重新发送验证邮件", key="resend_login_btn"):
+                            rs, rm = resend_verification_email(login_email)
+                            if rs:
+                                st.success(rm)
+                            else:
+                                st.error(rm)
     
     with tab2:
         reg_email = st.text_input("邮箱", key="reg_email", placeholder="your@email.com")
@@ -563,17 +639,30 @@ def show_auth_ui():
             elif len(reg_password) < 6:
                 st.error("密码至少6位")
             else:
-                success, msg = sign_up(reg_email, reg_password, reg_name)
+                success, msg, user_data, needs_verification = sign_up(reg_email, reg_password, reg_name)
                 if success:
-                    st.success(msg)
+                    if needs_verification:
+                        # 真实模式：需要邮箱验证
+                        st.success(msg)
+                        st.info("📧 请前往您的邮箱点击验证链接（可能需要 1-2 分钟）")
+                        if st.button("🔄 没收到？重新发送验证邮件", key="resend_reg_btn"):
+                            rs, rm = resend_verification_email(reg_email)
+                            if rs:
+                                st.success(rm)
+                            else:
+                                st.error(rm)
+                    else:
+                        # 已验证或免验证：直接登录
+                        if user_data:
+                            st.session_state["user"] = user_data
+                            st.info("✅ 已自动登录，可以开始使用了！")
+                            st.balloons()
+                            st.rerun()
                 else:
                     st.error(msg)
     
     st.markdown("---")
-    # 免登录体验
-    if st.button("免登录体验", use_container_width=True):
-        st.session_state["skip_login"] = True
-        st.rerun()
+    st.caption("💡 提示：注册后请查收验证邮件（可能需要 1-2 分钟），点击邮件中的链接完成验证后即可登录")
 def show_user_info():
     """显示已登录用户信息"""
     user = st.session_state.get("user")
@@ -586,21 +675,25 @@ def show_user_info():
 # ===== 初始化session_state =====
 # inspection_count 已在下方 IP 追踪块中初始化（取 max(本地, IP)）
 if "inspection_limit" not in st.session_state:
-    st.session_state["inspection_limit"] = 10
+    st.session_state["inspection_limit"] = 5
 if "inspection_history" not in st.session_state:
     st.session_state["inspection_history"] = []
 if "total_savings" not in st.session_state:
     st.session_state["total_savings"] = 0
 if "user" not in st.session_state:
     st.session_state["user"] = None
-if "skip_login" not in st.session_state:
-    st.session_state["skip_login"] = False
 if "analysis_result" not in st.session_state:
     st.session_state["analysis_result"] = None
 if "analysis_error" not in st.session_state:
     st.session_state["analysis_error"] = None
 if "last_raw_ai_response" not in st.session_state:
     st.session_state["last_raw_ai_response"] = None
+# PDF 导出次数限制（注册用户最多5次）
+if "export_count" not in st.session_state:
+    st.session_state["export_count"] = 0
+# 已导出报告ID集合（防止重复计数）
+if "exported_reports" not in st.session_state:
+    st.session_state["exported_reports"] = set()
 supabase_ready = is_supabase_configured()
 
 # 先初始化 inspection_count（从 query_params）
@@ -612,8 +705,7 @@ if "ip_usage_loaded" not in st.session_state:
     st.session_state["ip_usage_loaded"] = True
     if supabase_ready:
         client_ip = get_client_ip()
-        this_month = datetime.now().strftime("%Y-%m")
-        ip_count = get_ip_usage(client_ip, this_month)
+        ip_count = get_ip_usage(client_ip)
         st.session_state["ip_usage_count"] = ip_count
         # 关键修复：本地计数取 max(本地, IP)，防止关闭重置
         st.session_state["inspection_count"] = max(st.session_state["inspection_count"], ip_count)
@@ -621,30 +713,10 @@ if "ip_usage_loaded" not in st.session_state:
     else:
         st.session_state["ip_usage_count"] = 0
 
-# ===== 处理未登录状态 =====
-if not st.session_state["user"] and not st.session_state["skip_login"]:
-    # 未登录：显示登录/注册页面
-    st.title("外贸验货AI Agent - MVP")
-    st.markdown("---")
-    col_auth1, col_auth2 = st.columns([1, 1])    
-    with col_auth1:
-        show_auth_ui()    
-    with col_auth2:
-        st.subheader("关于本应用")
-        st.info(
-            "上传产品照片 → AI自动分析缺陷 → 生成专业验货报告\n\n"
-            "**免费体验：** 每用户10次/月\n\n"
-            "**适用场景：**\n"
-            "- 外贸验货员\n"
-            "- 质检部门\n"
-            "- 供应商管理\n\n"
-            "**注册登录后可持久保存你的验货记录**"
-        )
-        
-        st.markdown("---")
-        st.caption(f"版本：0.3.2 (MVP) | Supabase状态：{'已连接' if supabase_ready else '未配置（次数不持久化）'}")  
-        st.stop()
-# ===== 已登录：显示主应用 =====
+# ===== 主应用界面 =====
+# 【安全检查】在渲染主界面之前检查 IP 黑名单
+check_ip_blacklist()
+
 # 标题
 st.title("外贸验货AI Agent - MVP")
 st.markdown("---")
@@ -659,6 +731,11 @@ with st.sidebar:
     # 用户信息
     show_user_info()
     
+    # 未登录用户可选登录
+    if not st.session_state.get("user"):
+        with st.expander("登录/注册（可选）"):
+            show_auth_ui()
+    
     # 使用统计
     remaining = get_remaining()
     st.subheader("使用统计")
@@ -668,7 +745,7 @@ with st.sidebar:
     if remaining <= 2:
         st.warning(f"剩余次数不多")
     
-    st.caption(f"每用户 {get_inspection_limit()} 次/月")
+    st.caption(f"每用户 {get_inspection_limit()} 次")
     
     # 安全信息（仅管理员可见）
     client_ip = get_client_ip()
@@ -688,7 +765,6 @@ with st.sidebar:
     if st.button("退出登录"):
         sign_out()
         st.session_state["user"] = None
-        st.session_state["skip_login"] = False
         st.session_state["inspection_history"] = []
         st.session_state["total_savings"] = 0
         st.rerun()
@@ -867,10 +943,10 @@ st.markdown("---")
 
 if is_limit_reached():
     st.error(f"已达到使用次数限制（{get_inspection_limit()}次）")
-    st.info("请联系开发者增加次数")
+    st.info("试用次数已用完。注册登录解锁更多免费次数")
 else:
     remaining = get_remaining()
-    st.info(f"您还有 **{remaining}** 次免费使用次数")
+    st.info(f"您还有 **{remaining}** 次免费使用次数（永久）")
 
 col_btn1, col_btn2, col_btn3 = st.columns([1, 2, 1])
 with col_btn2:
@@ -899,9 +975,8 @@ with col_btn2:
                 # 同步 IP 计数到 Supabase（防换浏览器）
                 if supabase_ready:
                     client_ip = get_client_ip()
-                    this_month = datetime.now().strftime("%Y-%m")
-                    increment_ip_usage(client_ip, this_month)
-                    st.session_state["ip_usage_count"] = get_ip_usage(client_ip, this_month)
+                    increment_ip_usage(client_ip)
+                    st.session_state["ip_usage_count"] = get_ip_usage(client_ip)
             if user and supabase_ready:
                 update_inspection_count(user["id"], user["inspection_count"])
             
@@ -922,9 +997,8 @@ with col_btn2:
                     # 回退 IP 计数
                     if supabase_ready:
                         client_ip = get_client_ip()
-                        this_month = datetime.now().strftime("%Y-%m")
-                        decrement_ip_usage(client_ip, this_month)
-                        st.session_state["ip_usage_count"] = get_ip_usage(client_ip, this_month)
+                        decrement_ip_usage(client_ip)
+                        st.session_state["ip_usage_count"] = get_ip_usage(client_ip)
                 
                 if user and supabase_ready:
                     update_inspection_count(user["id"], user["inspection_count"])
@@ -970,6 +1044,14 @@ if st.session_state.get("analysis_result"):
     # 保存到本地历史
     st.session_state["inspection_history"].append(report_data)
     st.session_state["total_savings"] += report_data["savings"]
+    
+    # 内存优化：限制历史记录最多 5 条，防止 OOM
+    if len(st.session_state["inspection_history"]) > 5:
+        st.session_state["inspection_history"] = st.session_state["inspection_history"][-5:]
+        st.session_state["total_savings"] = sum(r.get("savings", 0) for r in st.session_state["inspection_history"])
+    
+    # 内存优化：清理原始 AI 响应（可能很大）
+    st.session_state["last_raw_ai_response"] = None
     
     # 保存到数据库
     user = st.session_state.get("user")
@@ -1084,6 +1166,25 @@ if st.session_state.get("analysis_result"):
     st.subheader("导出报告")
     font_available = check_font_available()
     
+    # 检查用户权限和导出次数
+    user = st.session_state.get("user")
+    can_export = False
+    export_msg = ""
+    
+    if not user:
+        # 未注册用户：不能导出
+        can_export = False
+        export_msg = "⚠️ 未注册用户不能导出 PDF。请注册后使用导出功能。"
+    else:
+        # 注册用户：检查导出次数
+        export_count = user.get("export_count", 0)
+        if export_count >= 5:
+            can_export = False
+            export_msg = "⚠️ 导出次数已用完（最多5次）。请联系管理员。"
+        else:
+            can_export = True
+            export_msg = f""
+    
     col_pdf1, col_pdf2 = st.columns(2)
     with col_pdf1:
         if st.button("预览报告（HTML）", use_container_width=True):
@@ -1091,23 +1192,54 @@ if st.session_state.get("analysis_result"):
             st.info("使用浏览器打印功能保存为PDF：Ctrl+P 或 Cmd+P")
     
     with col_pdf2:
-        try:
-            pdf_buffer = generate_inspection_pdf(report_data, uploaded_files)
-            conclusion_tag = "合格" if "合格" in report_data['conclusion'] else "不合格"
-            pdf_filename = f"验货报告_{conclusion_tag}_{report_data['product_name']}_{report_data['report_id'][:8]}.pdf"
-            st.download_button(
-                label="下载PDF报告",
-                data=pdf_buffer,
-                file_name=pdf_filename,
-                mime="application/pdf",
-                use_container_width=True,
-                key="download_pdf"
-            )
-            if not font_available:
-                st.warning("未检测到中文字体，PDF可能显示为英文。请联系管理员添加字体文件。")
-        except Exception as e:
-            st.error(f"PDF生成失败：{str(e)}")
-            st.info("临时方案：使用浏览器打印功能（Ctrl+P）保存为PDF")
+        if not can_export:
+            # 不能导出：显示提示
+            st.warning(export_msg)
+            if not user:
+                if st.button("前往注册", use_container_width=True):
+                    st.session_state["show_auth"] = True
+                    st.rerun()
+        else:
+            # 可以导出：显示下载按钮
+            try:
+                # 检查当前报告是否已导出过（防止重复计数）
+                report_id = report_data.get("report_id", "")
+                exported_reports = st.session_state.get("exported_reports", set()
+                
+                if report_id not in exported_reports:
+                    # 首次导出此报告：增加导出计数
+                    user["export_count"] = user.get("export_count", 0) + 1
+                    exported_reports.add(report_id)
+                    st.session_state["exported_reports"] = exported_reports
+                    
+                    # 更新数据库（如果已配置）
+                    if supabase_ready:
+                        try:
+                            from auth_helper import update_export_count
+                            update_export_count(user["id"], user["export_count"])
+                        except Exception as e:
+                            print(f"更新导出计数失败: {e}")
+                
+                pdf_buffer = generate_inspection_pdf(report_data, uploaded_files)
+                conclusion_tag = "合格" if "合格" in report_data['conclusion'] else "不合格"
+                pdf_filename = f"验货报告_{conclusion_tag}_{report_data['product_name']}_{report_data['report_id'][:8]}.pdf"
+                st.download_button(
+                    label=f"下载PDF报告（剩余 {5 - user['export_count']} 次）",
+                    data=pdf_buffer,
+                    file_name=pdf_filename,
+                    mime="application/pdf",
+                    use_container_width=True,
+                    key="download_pdf"
+                )
+                if not font_available:
+                    st.warning("未检测到中文字体，PDF可能显示为英文。请联系管理员添加字体文件。")
+            except Exception as e:
+                st.error(f"PDF生成失败：{str(e)}")
+                st.info("临时方案：使用浏览器打印功能（Ctrl+P）保存为PDF")
+    
+    # 显示导出次数（仅注册用户）
+    if user:
+        st.caption(f"导出次数：{user.get('export_count', 0)} / 5")
     
     # ROI展示
     st.markdown("---")
