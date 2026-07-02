@@ -1204,7 +1204,7 @@ if st.session_state.get("analysis_result"):
             try:
                 # 检查当前报告是否已导出过（防止重复计数）
                 report_id = report_data.get("report_id", "")
-                exported_reports = st.session_state.get("exported_reports", set()
+                exported_reports = st.session_state.get("exported_reports", set())
                 
                 if report_id not in exported_reports:
                     # 首次导出此报告：增加导出计数
