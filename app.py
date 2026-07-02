@@ -308,38 +308,44 @@ def analyze_product_images(uploaded_files, product_name, inspection_standard):
 用户上传了多张图片，按顺序编号为：图1、图2、图3...。
 在描述缺陷时，请用"图1"、"图2"这样的编号指明缺陷出现在哪张图片中。
 
-【AQL标准说明】
-- AQL 0.65：极严格，适用于关键缺陷（安全/功能）
-- AQL 1.0：严格，适用于重要缺陷
-- AQL 1.5：较严格，电子/纺织行业常用
-- AQL 2.5：通用标准（最常用），适用于一般缺陷
-- AQL 4.0：宽松，适用于外观/包装缺陷
-- AQL 6.5：极宽松，适用于非关键外观缺陷
+【AQL三层抽样标准】
+用户会提供一个三层AQL标准，格式为："致命:AQL X.X / 主要:AQL Y.Y / 次要:AQL Z.Z"
 
-【输出要求】必须严格按以下JSON格式返回，不要添加任何其他文字：
+请根据缺陷严重程度分类：
+1. **致命缺陷 (Critical)**：安全风险、违法、危及生命 - 使用 AQL X.X 判定
+2. **主要缺陷 (Major)**：功能失效、影响使用、关键尺寸偏差 - 使用 AQL Y.Y 判定
+3. **次要缺陷 (Minor)**：外观瑕疵、不影响功能、包装问题 - 使用 AQL Z.Z 判定
+
+【三层判定标准】
+- 致命缺陷（AQL X.X）：无致命缺陷 → 通过；存在任何致命缺陷 → 不通过
+- 主要缺陷（AQL Y.Y）：主要缺陷≤2个 → 通过；主要缺陷>2个 → 不通过
+- 次要缺陷（AQL Z.Z）：次要缺陷≤5个 → 通过；次要缺陷>5个 → 不通过
+
+【最终结论】
+- 合格：三层全部通过
+- 不合格：任何一层不通过
+- 有条件接受：次要缺陷层临界（如3-4个次要缺陷）
+
+【输出格式要求】必须严格按以下JSON格式返回：
 {
   "conclusion": "合格/不合格/有条件接受",
+  "three_layer_result": {
+    "critical": {"passed": true/false, "aql": "AQL X.X", "defect_count": 数字},
+    "major": {"passed": true/false, "aql": "AQL Y.Y", "defect_count": 数字},
+    "minor": {"passed": true/false, "aql": "AQL Z.Z", "defect_count": 数字}
+  },
   "defects": [
     {
       "type": "划痕/变形/色差/功能异常/包装破损等",
-      "quantity": 数字（必须是整数，如3，不能写"若干"或"少量"）,
-      "severity": "严重/中等/轻微",
+      "quantity": 数字（必须是整数）,      
+      "severity": "致命/主要/次要",
       "description": "详细描述缺陷位置、大小、程度（50字以内）",
-      "image": "图1 / 图2 / 图3"（缺陷出现在哪张图片，用编号表示；不确定则写"未明确"）
+      "image": "图1 / 图2 / 图3"
     }
   ],
-  "recommendation": "处理建议（100字以内，包含具体改进措施）",
-  "confidence": 0.0-1.0之间的数字（表示判断置信度）
-
+  "recommendation": "处理建议（100字以内）",
+  "confidence": 0.0-1.0
 }
-
-【判定标准】
-根据用户选择的AQL标准调整判定严格度：
-- AQL 0.65/1.0（严格）：无严重缺陷，中等缺陷≤1个，轻微缺陷≤2个 → 合格
-- AQL 1.5/2.5（通用）：无严重缺陷，中等缺陷≤2个，轻微缺陷≤5个 → 合格
-- AQL 4.0/6.5（宽松）：无严重缺陷，中等缺陷≤3个，轻微缺陷≤8个 → 合格
-- 不合格：存在任何严重缺陷，或中等缺陷超过上述阈值
-- 有条件接受：介于两者之间，需客户确认
 
 【注意事项】
 [注意] quantity字段必须是整数数字，禁止使用"若干"、"一些"、"多个"等模糊词汇
@@ -912,13 +918,40 @@ with col2:
         disabled=is_limit_reached()
     )
     
-    inspection_standard = st.selectbox(
-        "验货标准",
-        options=["AQL 0.65", "AQL 1.0", "AQL 1.5", "AQL 2.5", "AQL 4.0", "AQL 6.5", "客户自定义"],
-        index=2,
-        help="AQL (Acceptable Quality Limit) 是外贸验货常用标准",
-        disabled=is_limit_reached()
-    )
+    # AQL 三层抽样方案（方案 B）
+    st.markdown("**AQL 三层抽样标准（方案 B - 通用标准）**")
+    
+    col_aql1, col_aql2, col_aql3 = st.columns(3)
+    
+    with col_aql1:
+        aql_critical = st.selectbox(
+            "致命缺陷 (Critical)",
+            options=["AQL 0.65", "AQL 1.0", "AQL 1.5"],
+            index=1,
+            help="安全风险、违法 - 最严格",
+            disabled=is_limit_reached()
+        )
+    
+    with col_aql2:
+        aql_major = st.selectbox(
+            "主要缺陷 (Major)",
+            options=["AQL 1.0", "AQL 1.5", "AQL 2.5", "AQL 4.0"],
+            index=2,
+            help="功能失效、影响使用 - 通用标准",
+            disabled=is_limit_reached()
+        )
+    
+    with col_aql3:
+        aql_minor = st.selectbox(
+            "次要缺陷 (Minor)",
+            options=["AQL 2.5", "AQL 4.0", "AQL 6.5"],
+            index=1,
+            help="外观瑕疵、不影响功能 - 宽松",
+            disabled=is_limit_reached()
+        )
+    
+    # 组合成 inspection_standard 字符串传递给 AI
+    inspection_standard = f"致命:{aql_critical} / 主要:{aql_major} / 次要:{aql_minor}"
     
     order_quantity = st.number_input(
         "订单数量",
@@ -1035,6 +1068,7 @@ if st.session_state.get("analysis_result"):
         "order_quantity": order_quantity,
         "sample_size": sample_size,
         "conclusion": ai_result.get("conclusion", "分析结果未知"),
+        "three_layer_result": ai_result.get("three_layer_result", {}),  # 三层 AQL 结果
         "defects": ai_result.get("defects", []),
         "recommendation": ai_result.get("recommendation", "暂无建议"),
         "confidence": ai_result.get("confidence", 0.5),
@@ -1094,6 +1128,43 @@ if st.session_state.get("analysis_result"):
         st.error(f"### {conclusion}")
     else:
         st.warning(f"### {conclusion}")
+    
+    # 三层 AQL 结果显示
+    if "three_layer_result" in report_data:
+        st.markdown("--- ")
+        st.subheader("2. 三层 AQL 抽样结果")
+        
+        three_layer = report_data["three_layer_result"]
+        
+        col_layer1, col_layer2, col_layer3 = st.columns(3)
+        
+        with col_layer1:
+            st.markdown("**致命缺陷 (Critical)**")
+            st.caption(f"AQL {three_layer['critical']['aql']}")
+            if three_layer['critical']['passed']:
+                st.success("✓ 通过")
+            else:
+                st.error("✗ 不通过")
+            st.metric("缺陷数", three_layer['critical']['defect_count'])
+        
+        with col_layer2:
+            st.markdown("**主要缺陷 (Major)**")
+            st.caption(f"AQL {three_layer['major']['aql']}")
+            if three_layer['major']['passed']:
+                st.success("✓ 通过")
+            else:
+            
+                st.error("✗ 不通过")
+            st.metric("缺陷数", three_layer['major']['defect_count'])
+        
+        with col_layer3:
+            st.markdown("**次要缺陷 (Minor)**")
+            st.caption(f"AQL {three_layer['minor']['aql']}")
+            if three_layer['minor']['passed']:
+                st.success("✓ 通过")
+            else:
+                st.error("✗ 不通过")
+            st.metric("缺陷数", three_layer['minor']['defect_count'])
     
     st.info(f"**建议：** {report_data['recommendation']}")    
     # 置信度
