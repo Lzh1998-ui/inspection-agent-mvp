@@ -1,6 +1,7 @@
 """
 PDF 生成模块 - 外贸验货报告
 支持中文、图片嵌入、水印
+生成日期: 2026-07-05
 """
 
 from reportlab.lib.pagesizes import A4
@@ -141,6 +142,14 @@ def generate_inspection_pdf(report_data, uploaded_files):
         ["抽样数量", str(report_data.get("sample_size", "N/A"))]
     ]
     
+    # 添加 AQL 信息（如果存在）
+    if "aql_info" in report_data:
+        aql_info = report_data["aql_info"]
+        info_data.append(["样本量代码", aql_info.get("sample_code", "N/A")])
+        info_data.append(["致命缺陷(AQL 1.0)", f"Ac={aql_info.get('critical_ac', 'N/A')}, Re={aql_info.get('critical_re', 'N/A')}"])
+        info_data.append(["主要缺陷(AQL 2.5)", f"Ac={aql_info.get('major_ac', 'N/A')}, Re={aql_info.get('major_re', 'N/A')}"])
+        info_data.append(["次要缺陷(AQL 4.0)", f"Ac={aql_info.get('minor_ac', 'N/A')}, Re={aql_info.get('minor_re', 'N/A')}"])
+    
     if FONT_AVAILABLE:
         info_table = Table(info_data, colWidths=[4 * cm, 10 * cm])
         info_table.setStyle(TableStyle([
@@ -162,16 +171,40 @@ def generate_inspection_pdf(report_data, uploaded_files):
     # 验货结论
     story.append(Paragraph("1. 验货结论", heading_style))
     
-    conclusion = report_data.get("conclusion", "未知")
-    conclusion_color = colors.black
-    if "合格" in conclusion and "有条件" not in conclusion:
-        conclusion_color = colors.green
-    elif "不合格" in conclusion:
-        conclusion_color = colors.red
-    else:
-        conclusion_color = colors.orange
+    # 三层 AQL 结果（如果存在）
+    if "three_layer_result" in report_data:
+        three_layer = report_data["three_layer_result"]
+        story.append(Paragraph("<b>三层 AQL 判定结果：</b>", normal_style))
+        
+        layer_data = [
+            ["缺陷层级", "AQL 值", "判定结果", "发现数量"],
+            ["致命缺陷", "1.0", three_layer.get("critical", "未知"), str(three_layer.get("critical_count", 0))],
+            ["主要缺陷", "2.5", three_layer.get("major", "未知"), str(three_layer.get("major_count", 0))],
+            ["次要缺陷", "4.0", three_layer.get("minor", "未知"), str(three_layer.get("minor_count", 0))]
+        ]
+        
+        if FONT_AVAILABLE:
+            layer_table = Table(layer_data, colWidths=[3 * cm, 3 * cm, 4 * cm, 4 * cm])
+            layer_table.setStyle(TableStyle([
+                ("FONTNAME", (0, 0), (-1, -1), "Chinese"),
+                ("FONTSIZE", (0, 0), (-1, -1), 10),
+                ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+                ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
+                ("ALIGN", (0, 0), (-1, -1), "CENTER")
+            ]))
+        else:
+            layer_table = Table(layer_data, colWidths=[3 * cm, 3 * cm, 4 * cm, 4 * cm])
+            layer_table.setStyle(TableStyle([
+                ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+                ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
+                ("ALIGN", (0, 0), (-1, -1), "CENTER")
+            ]))
+        
+        story.append(layer_table)
+        story.append(Spacer(1, 0.3 * cm))
     
-    conclusion_para = Paragraph(f"<b>结论：</b>{conclusion}", normal_style)
+    conclusion = report_data.get("conclusion", "未知")
+    conclusion_para = Paragraph(f"<b>综合结论：</b>{conclusion}", normal_style)
     story.append(conclusion_para)
     story.append(Spacer(1, 0.3 * cm))
     
