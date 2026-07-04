@@ -32,6 +32,49 @@ def is_supabase_configured():
     """检查 Supabase 是否已配置"""
     return get_supabase() is not None
 
+# ===== 临时邮箱黑名单 =====
+TEMP_EMAIL_DOMAINS = {
+    # 10分钟临时邮箱
+    "10minutemail.com", "10minutemail.net", "10minmail.com",
+    "mailinator.com", "mailinator.net", "mailinator2.com",
+    "guerrillamail.com", "guerrillamail.net", "guerrillamail.org", "guerrillamail.biz",
+    "guerrillamailblock.com", "pokemail.net", "spam4.me",
+    "tempmail.com", "temp-mail.org", "temp-mail.io", "tempmail.net",
+    "throwaway.email", "throwawaymail.com",
+    "fakeinbox.com", "fakemailgenerator.com",
+    "maildrop.cc", "dispostable.com",
+    "yopmail.com", "yopmail.fr", "yopmail.net",
+    "trashmail.com", "trashmail.net", "trashmail.org",
+    "getairmail.com", "getnada.com", "nada.email",
+    "tempinbox.com", "mailnesia.com",
+    "mintemail.com", "sharklasers.com",
+    "spamgourmet.com", "mytrashmail.com",
+    "mailcatch.com", "mailnull.com",
+    "tempr.email", "discard.email", "discardmail.com",
+    "spambox.us", "spamfree24.org", "spamherelots.com",
+    "tempsky.com", "crazymailing.com",
+    "emailondeck.com", "tempail.com",
+    "mohmal.com", "mohmal.tech",
+    # 可以继续添加更多...
+}
+
+def is_temp_email(email):
+    """
+    检查邮箱是否为临时邮箱
+    返回: True 表示是临时邮箱，False 表示是正常邮箱
+    """
+    if not email or "@" not in email:
+        return False
+    
+    domain = email.split("@")[1].lower()
+    
+    # 检查是否是临时邮箱域名
+    for temp_domain in TEMP_EMAIL_DOMAINS:
+        if domain == temp_domain or domain.endswith("." + temp_domain):
+            return True
+    
+    return False
+
 # ===== 用户操作 =====
 
 def sign_up(email, password, display_name=""):
@@ -41,10 +84,16 @@ def sign_up(email, password, display_name=""):
     
     注册成功后，Supabase 会发送验证邮件到用户邮箱，
     用户需要点击邮件中的链接完成验证后才能登录。
+    
+    注意：不支持临时邮箱注册（如 Mailinator、10分钟邮箱等）
     """
     sb = get_supabase()
     if not sb:
         return False, "Supabase 未配置，请联系管理员", None, False
+    
+    # 检查是否是临时邮箱
+    if is_temp_email(email):
+        return False, "❌ 不支持临时邮箱注册。请使用您的工作邮箱或真实邮箱进行注册。", None, False
     
     try:
         resp = sb.auth.sign_up({
