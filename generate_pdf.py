@@ -1,8 +1,8 @@
 """
 PDF 生成模块 - 外贸验货报告
 支持中文、图片嵌入、水印
-生成日期: 2026-07-05
-修复: 图片尺寸自适应，防止超出页面边界
+生成日期: 2026-07-06
+修复: 支持项目目录嵌入字体，解决 Streamlit Cloud 中文字体缺失问题
 """
 
 from reportlab.lib.pagesizes import A4
@@ -26,26 +26,70 @@ MARGIN = 2 * cm
 AVAILABLE_WIDTH = PAGE_WIDTH - 2 * MARGIN
 AVAILABLE_HEIGHT = PAGE_HEIGHT - 2 * MARGIN
 
-# 尝试注册中文字体
+# 尝试注册中文字体（优先级：项目目录 > Windows 系统目录）
 FONT_AVAILABLE = False
-FONT_PATHS = [
+FONT_NAME = "Chinese"
+
+# 1. 首先尝试项目目录下的 fonts/ 文件夹（推荐方式，用于 Streamlit Cloud）
+PROJECT_FONT_PATHS = [
+    "fonts/NotoSansCJK-Regular.ttc",
+    "fonts/NotoSansCJK-Regular.otf",
+    "fonts/SourceHanSansCN-Regular.otf",
+    "fonts/SourceHanSansCN-Regular.ttf",
+    "fonts/wqy-microhei.ttc",
+    "fonts/wqy-zenhei.ttc",
+    "fonts/simhei.ttf",
+    "fonts/simsun.ttc",
+]
+
+# 2. 备用：Windows 系统字体（本地开发环境）
+SYSTEM_FONT_PATHS = [
     "C:/Windows/Fonts/simhei.ttf",  # 黑体
     "C:/Windows/Fonts/simsun.ttc",  # 宋体
     "C:/Windows/Fonts/msyh.ttc",    # 微软雅黑
+    "C:/Windows/Fonts/msyhbd.ttc",  # 微软雅黑粗体
 ]
 
-for path in FONT_PATHS:
+# 合并所有字体路径（项目目录优先）
+ALL_FONT_PATHS = PROJECT_FONT_PATHS + SYSTEM_FONT_PATHS
+
+for path in ALL_FONT_PATHS:
     if os.path.exists(path):
         try:
-            pdfmetrics.registerFont(TTFont("Chinese", path))
+            pdfmetrics.registerFont(TTFont(FONT_NAME, path))
             FONT_AVAILABLE = True
+            print(f"✅ 成功加载中文字体: {path}")
             break
-        except Exception:
+        except Exception as e:
+            print(f"⚠️ 字体加载失败 {path}: {e}")
             continue
 
 def check_font_available():
     """检查中文字体是否可用"""
     return FONT_AVAILABLE
+
+def get_font_warning_message():
+    """获取字体警告信息"""
+    if FONT_AVAILABLE:
+        return None
+    return """
+    ⚠️ **未检测到中文字体，PDF可能显示为英文**
+    
+    **解决方案：**
+    1. 下载开源中文字体（推荐思源黑体）
+       - 地址：https://github.com/adobe-fonts/source-han-sans/releases
+       - 下载 `SourceHanSansCN-Regular.otf`
+    
+    2. 在项目根目录创建 `fonts/` 文件夹
+    
+    3. 将字体文件放入 `fonts/` 目录
+    
+    4. 重新部署即可
+    
+    **备用字体下载：**
+    - 文泉驿微米黑：https://sourceforge.net/projects/wqy/files/wqy-microhei/
+    - Google Noto CJK：https://fonts.google.com/noto/fonts?noto.query=chinese
+    """
 
 def add_watermark(canvas, doc):
     """
@@ -58,7 +102,7 @@ def add_watermark(canvas, doc):
     # 设置字体（斜体）
     if FONT_AVAILABLE:
         try:
-            canvas.setFont("Chinese", 60)
+            canvas.setFont(FONT_NAME, 60)
         except Exception:
             canvas.setFont("Helvetica-BoldOblique", 60)
     else:
@@ -137,7 +181,7 @@ def generate_inspection_pdf(report_data, uploaded_files):
         title_style = ParagraphStyle(
             "CustomTitle",
             parent=styles["Heading1"],
-            fontName="Chinese",
+            fontName=FONT_NAME,
             fontSize=18,
             alignment=TA_CENTER
         )
@@ -145,14 +189,14 @@ def generate_inspection_pdf(report_data, uploaded_files):
         heading_style = ParagraphStyle(
             "CustomHeading",
             parent=styles["Heading2"],
-            fontName="Chinese",
+            fontName=FONT_NAME,
             fontSize=14
         )
         
         normal_style = ParagraphStyle(
             "CustomNormal",
             parent=styles["Normal"],
-            fontName="Chinese",
+            fontName=FONT_NAME,
             fontSize=10
         )
     else:
@@ -188,7 +232,7 @@ def generate_inspection_pdf(report_data, uploaded_files):
     if FONT_AVAILABLE:
         info_table = Table(info_data, colWidths=[4 * cm, 10 * cm])
         info_table.setStyle(TableStyle([
-            ("FONTNAME", (0, 0), (-1, -1), "Chinese"),
+            ("FONTNAME", (0, 0), (-1, -1), FONT_NAME),
             ("FONTSIZE", (0, 0), (-1, -1), 10),
             ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
             ("BACKGROUND", (0, 0), (0, -1), colors.lightgrey)
@@ -221,7 +265,7 @@ def generate_inspection_pdf(report_data, uploaded_files):
         if FONT_AVAILABLE:
             layer_table = Table(layer_data, colWidths=[3 * cm, 3 * cm, 4 * cm, 4 * cm])
             layer_table.setStyle(TableStyle([
-                ("FONTNAME", (0, 0), (-1, -1), "Chinese"),
+                ("FONTNAME", (0, 0), (-1, -1), FONT_NAME),
                 ("FONTSIZE", (0, 0), (-1, -1), 10),
                 ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
                 ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
@@ -266,7 +310,7 @@ def generate_inspection_pdf(report_data, uploaded_files):
         if FONT_AVAILABLE:
             defect_table = Table(defect_data, colWidths=[2 * cm, 5 * cm, 3 * cm, 4 * cm])
             defect_table.setStyle(TableStyle([
-                ("FONTNAME", (0, 0), (-1, -1), "Chinese"),
+                ("FONTNAME", (0, 0), (-1, -1), FONT_NAME),
                 ("FONTSIZE", (0, 0), (-1, -1), 10),
                 ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
                 ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
