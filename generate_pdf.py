@@ -2,6 +2,7 @@
 PDF 生成模块 - 外贸验货报告
 支持中文、图片嵌入、水印
 生成日期: 2026-07-05
+修复: 图片尺寸自适应，防止超出页面边界
 """
 
 from reportlab.lib.pagesizes import A4
@@ -16,6 +17,14 @@ from reportlab.lib.colors import Color
 import os
 from io import BytesIO
 from PIL import Image as PILImage
+
+# A4 页面尺寸（单位：points，1 inch = 72 points）
+PAGE_WIDTH, PAGE_HEIGHT = A4
+# 边距
+MARGIN = 2 * cm
+# 可用内容区域
+AVAILABLE_WIDTH = PAGE_WIDTH - 2 * MARGIN
+AVAILABLE_HEIGHT = PAGE_HEIGHT - 2 * MARGIN
 
 # 尝试注册中文字体
 FONT_AVAILABLE = False
@@ -71,6 +80,32 @@ def add_watermark(canvas, doc):
             canvas.drawString(x + i * 300, y + j * 200, "仅限内部使用")
     
     canvas.restoreState()
+
+def resize_image_to_fit(img_width, img_height, max_width, max_height):
+    """
+    计算图片缩放后的尺寸，确保不超出指定边界
+    
+    参数:
+        img_width: 原始图片宽度
+        img_height: 原始图片高度
+        max_width: 最大允许宽度
+        max_height: 最大允许高度
+    
+    返回:
+        (new_width, new_height): 缩放后的尺寸
+    """
+    # 初始按宽度缩放
+    ratio = max_width / img_width
+    new_width = max_width
+    new_height = img_height * ratio
+    
+    # 如果高度超出，再按高度缩放
+    if new_height > max_height:
+        ratio = max_height / new_height
+        new_width = new_width * ratio
+        new_height = max_height
+    
+    return new_width, new_height
 
 def generate_inspection_pdf(report_data, uploaded_files):
     """
@@ -256,19 +291,34 @@ def generate_inspection_pdf(report_data, uploaded_files):
     # 照片附件
     story.append(Paragraph("3. 照片附件", heading_style))
     
+    # 图片最大尺寸限制（预留一些边距）
+    max_img_width = AVAILABLE_WIDTH
+    max_img_height = AVAILABLE_HEIGHT * 0.7  # 图片最多占页面高度的70%
+    
     if uploaded_files:
         for idx, file in enumerate(uploaded_files, 1):
             try:
                 file.seek(0)
                 img = PILImage.open(file)
                 img_width, img_height = img.size
-                max_width = 16 * cm
-                ratio = max_width / img_width
-                new_width = max_width
-                new_height = img_height * ratio
+                
+                # 使用自适应缩放函数
+                new_width, new_height = resize_image_to_fit(
+                    img_width, img_height,
+                    max_img_width, max_img_height
+                )
                 
                 img_buffer = BytesIO()
-                img.save(img_buffer, format="JPEG")
+                
+                # 处理 RGBA 模式图片（转换为 RGB）
+                if img.mode == 'RGBA':
+                    # 创建白色背景
+                    background = PILImage.new('RGB', img.size, (255, 255, 255))
+                    background.paste(img, mask=img.split()[3])  # 使用 alpha 通道作为 mask
+                    background.save(img_buffer, format="JPEG", quality=85)
+                else:
+                    img.save(img_buffer, format="JPEG", quality=85)
+                
                 img_buffer.seek(0)
                 
                 img_obj = Image(img_buffer, width=new_width, height=new_height)
@@ -276,8 +326,13 @@ def generate_inspection_pdf(report_data, uploaded_files):
                 story.append(Spacer(1, 0.3 * cm))
                 
             except Exception as e:
-                print(f"图片处理失败: {e}")
+                print(f"图片 {idx} 处理失败: {e}")
+                # 添加错误提示到 PDF
+                story.append(Paragraph(f"[图片 {idx} 处理失败]", normal_style))
+                story.append(Spacer(1, 0.3 * cm))
                 continue
+    else:
+        story.append(Paragraph("无照片附件", normal_style))
     
     # 生成 PDF（带水印）
     doc.build(
