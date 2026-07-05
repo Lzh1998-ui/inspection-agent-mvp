@@ -710,9 +710,19 @@ def show_auth_ui():
             if not login_email or not login_password:
                 st.error("请填写邮箱和密码")
             else:
-                success, msg, user_data, needs_verification = sign_in(login_email, login_password)
+                # 【关键修复】登录时传入本地已使用次数，合并到数据库
+                local_count = st.session_state.get("inspection_count", 0)
+                success, msg, user_data, needs_verification = sign_in(login_email, login_password, local_count)
                 if success:
                     st.session_state["user"] = user_data
+                    # 【关键修复】登录成功后清除本地计数（已合并到数据库）
+                    st.session_state["inspection_count"] = user_data.get("inspection_count", 0)
+                    try:
+                        # 清除 URL 参数中的旧计数，避免登录后混淆
+                        if "total_usage_count" in st.query_params:
+                            del st.query_params["total_usage_count"]
+                    except:
+                        pass
                     st.rerun()
                 else:
                     st.error(msg)
@@ -755,6 +765,13 @@ def show_auth_ui():
                         # 已验证或免验证：直接登录
                         if user_data:
                             st.session_state["user"] = user_data
+                            # 【关键修复】登录成功后清除本地计数（已合并到数据库）
+                            st.session_state["inspection_count"] = user_data.get("inspection_count", 0)
+                            try:
+                                if "total_usage_count" in st.query_params:
+                                    del st.query_params["total_usage_count"]
+                            except:
+                                pass
                             st.info("✅ 已自动登录，可以开始使用了！")
                             st.balloons()
                             st.rerun()
