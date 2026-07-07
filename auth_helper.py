@@ -125,7 +125,7 @@ def get_dns_error_message(hostname, error_detail):
 
 # ===== 缓存 Supabase 客户端（避免重复初始化）=====
 
-SUPABASE_HOST = "zbepdifjpfvphcjbhchx.supabase.co"
+SUPABASE_HOST = "zbepdifpjfvphcjbhchx.supabase.co"
 
 @st.cache_resource
 def get_supabase():
