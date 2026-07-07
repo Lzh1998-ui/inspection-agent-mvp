@@ -1,15 +1,13 @@
 """
 DNS 诊断工具 - 排查 Streamlit Cloud 容器网络问题
 ====================================================
-功能：
-1. 测试 Supabase 域名解析
+功能�?1. 测试 Supabase 域名解析
 2. 测试多个外部域名（判断容器网络状态）
 3. 显示 /etc/resolv.conf DNS 配置
 4. TCP 连接测试
 5. 生成诊断报告
 
-使用：
-- 在 Streamlit 应用中：from dns_diagnostic import show_dns_diagnostic
+使用�?- �?Streamlit 应用中：from dns_diagnostic import show_dns_diagnostic
 - 独立运行：python dns_diagnostic.py
 """
 
@@ -19,7 +17,7 @@ import platform
 import time
 
 def test_dns_resolution(hostname, port=443, timeout=5):
-    """测试单个域名的 DNS 解析（同时尝试 IPv4 和 IPv6）"""
+    """测试单个域名�?DNS 解析（同时尝�?IPv4 �?IPv6�?""
     results = {
         "hostname": hostname,
         "ipv4": None,
@@ -49,8 +47,7 @@ def test_dns_resolution(hostname, port=443, timeout=5):
     except Exception as e:
         results["ipv6_error"] = f"异常: {e}"
     
-    # TCP 连接测试（使用 IPv4）
-    if results["ipv4"]:
+    # TCP 连接测试（使�?IPv4�?    if results["ipv4"]:
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(timeout)
@@ -85,15 +82,14 @@ def get_dns_config():
     return config
 
 
-def run_diagnostics(hostname="zbepdifjpfvphcjbhchx.supabase.co"):
+def run_diagnostics(hostname="zbepdifpjfvphcjbhchx.supabase.co"):
     """
     运行完整 DNS 诊断
     
     参数:
         hostname: 要测试的目标域名
     
-    返回: dict 包含所有诊断结果
-    """
+    返回: dict 包含所有诊断结�?    """
     report = {
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
         "system": {
@@ -114,11 +110,11 @@ def run_diagnostics(hostname="zbepdifjpfvphcjbhchx.supabase.co"):
         ("www.google.com", "🔍 Google", False),
         ("github.com", "💻 GitHub", False),
         ("pypi.org", "📦 PyPI", False),
-        ("1.1.1.1", "☁️ Cloudflare DNS（IP直连）", False),
+        ("1.1.1.1", "☁️ Cloudflare DNS（IP直连�?, False),
     ]
     
     for host, desc, is_target in test_hosts:
-        # 如果是 IP 地址，跳过 DNS 解析，只测试 TCP
+        # 如果�?IP 地址，跳�?DNS 解析，只测试 TCP
         if host.replace(".", "").isdigit():
             tcp_result = test_dns_resolution(host, port=443, timeout=3)
             report["tests"][host] = {
@@ -150,19 +146,18 @@ def run_diagnostics(hostname="zbepdifjpfvphcjbhchx.supabase.co"):
     target = report["tests"].get(hostname, {})
     if target.get("ipv4"):
         if target.get("tcp_ok"):
-            report["summary"] = "✅ Supabase 网络完全正常 - 问题在应用层（可能需要重启或查看其他错误）"
+            report["summary"] = "�?Supabase 网络完全正常 - 问题在应用层（可能需要重启或查看其他错误�?
         else:
-            report["summary"] = f"⚠️ Supabase 域名能解析但 TCP 连接失败 - 网络层问题: {target.get('tcp_error')}"
+            report["summary"] = f"⚠️ Supabase 域名能解析但 TCP 连接失败 - 网络层问�? {target.get('tcp_error')}"
     else:
-        # 检查其他域名
-        other_ok = any(
+        # 检查其他域�?        other_ok = any(
             r.get("ipv4") for h, r in report["tests"].items() 
             if h != hostname and not h.replace(".", "").isdigit()
         )
         if not other_ok:
-            report["summary"] = "❌ 容器完全无法访问外部网络 - Streamlit Cloud 网络故障，需要联系支持"
+            report["summary"] = "�?容器完全无法访问外部网络 - Streamlit Cloud 网络故障，需要联系支�?
         else:
-            report["summary"] = "❌ Supabase 域名解析失败但其他域名正常 - 可能是 DNS 缓存或 supabase.co 路由问题"
+            report["summary"] = "�?Supabase 域名解析失败但其他域名正�?- 可能�?DNS 缓存�?supabase.co 路由问题"
     
     return report
 
@@ -204,25 +199,25 @@ def format_report_text(report):
         if host.replace(".", "").isdigit():
             # IP 直连
             if r["tcp_ok"]:
-                lines.append(f"    ✅ TCP 连通: {r['tcp_ip']}:443")
+                lines.append(f"    �?TCP 连�? {r['tcp_ip']}:443")
             else:
-                lines.append(f"    ❌ TCP 失败: {r['tcp_error']}")
+                lines.append(f"    �?TCP 失败: {r['tcp_error']}")
         else:
             # 域名测试
             if r["ipv4"]:
-                lines.append(f"    ✅ IPv4 解析: {r['ipv4']}")
+                lines.append(f"    �?IPv4 解析: {r['ipv4']}")
             else:
-                lines.append(f"    ❌ IPv4 解析失败: {r['ipv4_error']}")
+                lines.append(f"    �?IPv4 解析失败: {r['ipv4_error']}")
             
             if r["ipv6"]:
-                lines.append(f"    ✅ IPv6 解析: {r['ipv6']}")
+                lines.append(f"    �?IPv6 解析: {r['ipv6']}")
             else:
                 lines.append(f"    ⚠️ IPv6 解析失败: {r['ipv6_error']}")
             
             if r["tcp_ok"]:
-                lines.append(f"    ✅ TCP 连通: {r['tcp_ip']}:443")
+                lines.append(f"    �?TCP 连�? {r['tcp_ip']}:443")
             elif r["ipv4"]:
-                lines.append(f"    ❌ TCP 失败: {r['tcp_error']}")
+                lines.append(f"    �?TCP 失败: {r['tcp_error']}")
     
     # 总结
     lines.append(f"\n" + "=" * 70)
@@ -233,15 +228,15 @@ def format_report_text(report):
     # 修复建议
     lines.append(f"\n💡 修复建议:")
     if "完全无法访问外部网络" in report["summary"]:
-        lines.append(f"  1. 这不是代码问题，是 Streamlit Cloud 容器网络故障")
+        lines.append(f"  1. 这不是代码问题，�?Streamlit Cloud 容器网络故障")
         lines.append(f"  2. 建议联系 Streamlit Cloud 支持: support@streamlit.io")
-        lines.append(f"  3. 临时方案: 迁移到 Railway.app / Render.com / Fly.io")
+        lines.append(f"  3. 临时方案: 迁移�?Railway.app / Render.com / Fly.io")
         lines.append(f"  4. 或在 GitHub Issue 搜索: 'Streamlit Cloud DNS not working'")
-    elif "Supabase 域名解析失败但其他域名正常" in report["summary"]:
-        lines.append(f"  1. 尝试 Reboot app: Manage app → Reboot app")
-        lines.append(f"  2. 如仍失败，联系 Streamlit Cloud 支持说明情况")
+    elif "Supabase 域名解析失败但其他域名正�? in report["summary"]:
+        lines.append(f"  1. 尝试 Reboot app: Manage app �?Reboot app")
+        lines.append(f"  2. 如仍失败，联�?Streamlit Cloud 支持说明情况")
     elif "TCP 连接失败" in report["summary"]:
-        lines.append(f"  1. DNS 解析正常但网络层不通 - 防火墙或路由问题")
+        lines.append(f"  1. DNS 解析正常但网络层不�?- 防火墙或路由问题")
         lines.append(f"  2. Reboot app 试试")
         lines.append(f"  3. 仍失败则联系支持")
     
@@ -250,19 +245,19 @@ def format_report_text(report):
 
 def show_dns_diagnostic():
     """
-    在 Streamlit 页面中显示 DNS 诊断工具
+    �?Streamlit 页面中显�?DNS 诊断工具
     """
     import streamlit as st
     
     st.markdown("### 🩺 网络诊断工具")
-    st.caption("诊断 Streamlit Cloud 容器到 Supabase 服务器的网络连接")
+    st.caption("诊断 Streamlit Cloud 容器�?Supabase 服务器的网络连接")
     
     col1, col2 = st.columns(2)
     with col1:
         target_host = st.text_input(
             "目标域名",
-            value="zbepdifjpfvphcjbhchx.supabase.co",
-            help="默认是你的 Supabase 项目域名"
+            value="zbepdifpjfvphcjbhchx.supabase.co",
+            help="默认是你�?Supabase 项目域名"
         )
     with col2:
         st.markdown("<br>", unsafe_allow_html=True)
@@ -278,7 +273,7 @@ def show_dns_diagnostic():
             
             # 总结卡片
             summary = report["summary"]
-            if "✅" in summary:
+            if "�? in summary:
                 st.success(summary)
             elif "⚠️" in summary:
                 st.warning(summary)
