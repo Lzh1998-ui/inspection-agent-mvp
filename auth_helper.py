@@ -3,12 +3,74 @@
 ================================
 如果未配置 Supabase，自动降级为本地 Session 模式（无持久化）
 
-修复说明（2026-07-06）：
-- 添加 DNS 预检：在 sign_in/sign_up 前先测试域名解析
+修复说明（2026-07-06 03:32）：
+- 【关键】DoH Monkey Patch：在 socket 层面劫持 DNS 失败，用 Cloudflare 1.1.1.1 兜底
+  - 解决 Streamlit Cloud 容器 DNS 完全失效问题
+  - 即使系统 DNS 100% 失败，supabase 库仍能解析域名
+- DNS 预检：在 sign_in/sign_up 前先测试域名解析
 - 详细错误诊断：把 DNS 错误翻译成用户可懂的提示
-- DNS 解析失败时给出具体修复建议
 """
 
+# ===== DoH Monkey Patch（必须在所有 import 之前）=====
+import sys as _sys
+import socket as _socket
+import json as _json
+import urllib.request as _urllib_request
+import time as _time
+
+print("=" * 60, flush=True)
+print("[AUTH_HELPER] v2026-07-06-DoH-fallback LOADED", flush=True)
+print("=" * 60, flush=True)
+
+# 保存原始 getaddrinfo
+_original_getaddrinfo = _socket.getaddrinfo
+_DOH_CACHE = {}
+_DOH_CACHE_TTL = 600  # 10 分钟缓存
+
+def _doh_resolve(hostname, timeout=5):
+    """通过 Cloudflare DoH (1.1.1.1) 解析域名 — 1.1.1.1 是 IP，不需要 DNS"""
+    now = _time.time()
+    if hostname in _DOH_CACHE:
+        ip, ts = _DOH_CACHE[hostname]
+        if now - ts < _DOH_CACHE_TTL:
+            return ip
+    try:
+        url = f"https://1.1.1.1/dns-query?name={hostname}&type=A"
+        req = _urllib_request.Request(url, headers={"Accept": "application/dns-json"})
+        with _urllib_request.urlopen(req, timeout=timeout) as resp:
+            data = _json.loads(resp.read())
+        if "Answer" in data:
+            for ans in data["Answer"]:
+                if ans.get("type") == 1:  # A 记录
+                    ip = ans["data"]
+                    _DOH_CACHE[hostname] = (ip, now)
+                    print(f"[AUTH_HELPER] ✅ DoH 解析: {hostname} → {ip}", flush=True)
+                    return ip
+    except Exception as e:
+        print(f"[AUTH_HELPER] ⚠️ DoH 失败: {hostname}: {e}", flush=True)
+    return None
+
+
+def _patched_getaddrinfo(host, port, *args, **kwargs):
+    """先尝试系统 DNS，失败后用 DoH 兜底（关键修复）"""
+    try:
+        return _original_getaddrinfo(host, port, *args, **kwargs)
+    except _socket.gaierror as e:
+        print(f"[AUTH_HELPER] 系统 DNS 失败: {host}, 尝试 DoH fallback...", flush=True)
+        ip = _doh_resolve(host)
+        if ip:
+            # 返回 (family, type, proto, canonname, sockaddr) 格式
+            return [(_socket.AF_INET, _socket.SOCK_STREAM, 6, "", (ip, port or 0))]
+        print(f"[AUTH_HELPER] ❌ 系统 DNS + DoH 都失败: {host}: {e}", flush=True)
+        raise
+
+# 立即 patch - 必须在 import supabase 之前
+_socket.getaddrinfo = _patched_getaddrinfo
+print("[AUTH_HELPER] ✅ socket.getaddrinfo DoH fallback 已启用", flush=True)
+print("=" * 60, flush=True)
+
+
+# ===== 正常 import =====
 import streamlit as st
 import socket
 import time
