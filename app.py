@@ -1304,31 +1304,33 @@ if st.session_state.get("analysis_result"):
             with col_def3:
                 st.write("**严重程度**")
                 severity = defect.get("severity", "未知")
-                if severity == "轻微":
+                if severity == "次要":
                     st.success(severity)
-                elif severity == "中等":
+                elif severity == "主要":
                     st.warning(severity)
-                else:
+                else:  # 致命或其他
                     st.error(severity)
     else:
         st.info("未发现明显缺陷")
     
     st.markdown("---")
-        # 缺陷统计摘要
+    
+    # 缺陷统计摘要
     if report_data["defects"]:
         defects = report_data["defects"]
-        severity_counts = {"严重": 0, "中等": 0, "轻微": 0}
+        # 统一使用 AQL 三层命名：致命/主要/次要
+        severity_counts = {"致命": 0, "主要": 0, "次要": 0}
         for d in defects:
-            sev = d.get("severity", "轻微")
+            sev = d.get("severity", "次要")
             severity_counts[sev] = severity_counts.get(sev, 0) + 1
         
         stat_cols = st.columns(3)
         with stat_cols[0]:
-            st.metric("严重缺陷", severity_counts.get("严重", 0))
+            st.metric("致命缺陷", severity_counts.get("致命", 0))
         with stat_cols[1]:
-            st.metric("中等缺陷", severity_counts.get("中等", 0))
+            st.metric("主要缺陷", severity_counts.get("主要", 0))
         with stat_cols[2]:
-            st.metric("轻微缺陷", severity_counts.get("轻微", 0))
+            st.metric("次要缺陷", severity_counts.get("次要", 0))
         
         # 通过率计算
         if report_data.get("sample_size", 0) > 0:
