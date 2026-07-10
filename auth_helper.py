@@ -320,6 +320,8 @@ def sign_in(email, password, local_usage_count=0):
                 if profile.data:
                     db_count = profile.data[0].get("inspection_count", 0)
                     user_data["inspection_limit"] = profile.data[0].get("inspection_limit", 10)
+                    # 【关键修复】加载导出次数
+                    user_data["export_count"] = profile.data[0].get("export_count", 0) or 0
                     
                     merged_count = db_count
                     if local_usage_count > 0 and local_usage_count > db_count:
@@ -336,13 +338,15 @@ def sign_in(email, password, local_usage_count=0):
                 else:
                     user_data["inspection_count"] = local_usage_count
                     user_data["inspection_limit"] = 10
+                    user_data["export_count"] = 0
                     try:
                         sb.table("user_profiles").insert({
                             "id": resp.user.id,
                             "email": email,
                             "display_name": user_data["display_name"],
                             "inspection_count": local_usage_count,
-                            "inspection_limit": 10
+                            "inspection_limit": 10,
+                            "export_count": 0
                         }).execute()
                     except Exception as insert_err:
                         print(f"[DEBUG] 自动创建 profile 失败: {insert_err}")
@@ -350,6 +354,7 @@ def sign_in(email, password, local_usage_count=0):
                 print(f"[DEBUG] 获取用户配置失败: {e}")
                 user_data["inspection_count"] = local_usage_count
                 user_data["inspection_limit"] = 10
+                user_data["export_count"] = 0
             
             return True, "登录成功", user_data, False
         return False, "登录失败：邮箱或密码错误", None, False

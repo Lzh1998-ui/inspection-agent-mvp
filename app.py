@@ -717,6 +717,8 @@ def show_auth_ui():
                     st.session_state["user"] = user_data
                     # 【关键修复】登录成功后清除本地计数（已合并到数据库）
                     st.session_state["inspection_count"] = user_data.get("inspection_count", 0)
+                    # 【关键修复】同步导出次数到 session_state
+                    st.session_state["export_count"] = user_data.get("export_count", 0)
                     try:
                         # 清除 URL 参数中的旧计数，避免登录后混淆
                         if "total_usage_count" in st.query_params:
@@ -767,6 +769,8 @@ def show_auth_ui():
                             st.session_state["user"] = user_data
                             # 【关键修复】登录成功后清除本地计数（已合并到数据库）
                             st.session_state["inspection_count"] = user_data.get("inspection_count", 0)
+                            # 【关键修复】同步导出次数到 session_state
+                            st.session_state["export_count"] = user_data.get("export_count", 0)
                             try:
                                 if "total_usage_count" in st.query_params:
                                     del st.query_params["total_usage_count"]
