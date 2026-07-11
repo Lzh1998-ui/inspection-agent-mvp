@@ -12,8 +12,8 @@ import base64
 import httpx
 import re
 
-# ===== AQL 标准表（简化版 ANSI/ASQ Z1.4 / ISO 2859-1）=====
-# 样本量代码表（根据订单数量查表）
+# ===== AQL 标准表(简化版 ANSI/ASQ Z1.4 / ISO 2859-1)=====
+# 样本量代码表(根据订单数量查表)
 AQL_SAMPLE_SIZE_CODE = {
     # 订单数量范围 : 样本量代码
     (2, 8): "A",
@@ -40,54 +40,78 @@ AQL_SAMPLE_SIZE = {
     "L": 200, "M": 315, "N": 500, "P": 800, "Q": 1250
 }
 
-# Ac/Re 表（接收数/拒收数）
-# 格式：{样本量代码: {AQL值: (Ac, Re)}}
+# Ac/Re 表(接收数/拒收数)
+# 格式:{样本量代码: {AQL值: (Ac, Re)}}
+# 依据 ANSI/ASQ Z1.4 (ISO 2859-1 / MIL-STD-105E) 单次抽样、正常检验、一般检查水平 II
+# Ac 序列沿对角线遵循标准接收数序列 [0,1,2,3,5,7,10,14,21],Re = Ac + 1
+# 说明:小样本量(A/B/C/D)在低 AQL 处标准表为箭头(指向更大样本方案),
+#      此处取保守值 Ac=0(Re=1),即"发现1个即拒收",偏严格更安全。
 AQL_AC_RE = {
-    "A": {
+    "A": {  # n=2
         "AQL 0.65": (0, 1), "AQL 1.0": (0, 1), "AQL 1.5": (0, 1),
         "AQL 2.5": (0, 1), "AQL 4.0": (0, 1), "AQL 6.5": (0, 1)
     },
-    "B": {
+    "B": {  # n=3
         "AQL 0.65": (0, 1), "AQL 1.0": (0, 1), "AQL 1.5": (0, 1),
         "AQL 2.5": (0, 1), "AQL 4.0": (0, 1), "AQL 6.5": (0, 1)
     },
-    "C": {
+    "C": {  # n=5
+        "AQL 0.65": (0, 1), "AQL 1.0": (0, 1), "AQL 1.5": (0, 1),
+        "AQL 2.5": (0, 1), "AQL 4.0": (0, 1), "AQL 6.5": (1, 2)
+    },
+    "D": {  # n=8
         "AQL 0.65": (0, 1), "AQL 1.0": (0, 1), "AQL 1.5": (0, 1),
         "AQL 2.5": (0, 1), "AQL 4.0": (1, 2), "AQL 6.5": (1, 2)
     },
-    "D": {
+    "E": {  # n=13
         "AQL 0.65": (0, 1), "AQL 1.0": (0, 1), "AQL 1.5": (0, 1),
+        "AQL 2.5": (1, 2), "AQL 4.0": (1, 2), "AQL 6.5": (2, 3)
+    },
+    "F": {  # n=20
+        "AQL 0.65": (0, 1), "AQL 1.0": (0, 1), "AQL 1.5": (1, 2),
         "AQL 2.5": (1, 2), "AQL 4.0": (2, 3), "AQL 6.5": (3, 4)
     },
-    "E": {
-        "AQL 0.65": (0, 1), "AQL 1.0": (0, 1), "AQL 1.5": (1, 2),
+    "G": {  # n=32
+        "AQL 0.65": (0, 1), "AQL 1.0": (1, 2), "AQL 1.5": (1, 2),
         "AQL 2.5": (2, 3), "AQL 4.0": (3, 4), "AQL 6.5": (5, 6)
     },
-    "F": {
-        "AQL 0.65": (0, 1), "AQL 1.0": (1, 2), "AQL 1.5": (2, 3),
+    "H": {  # n=50
+        "AQL 0.65": (1, 2), "AQL 1.0": (1, 2), "AQL 1.5": (2, 3),
         "AQL 2.5": (3, 4), "AQL 4.0": (5, 6), "AQL 6.5": (7, 8)
     },
-    "G": {
-        "AQL 0.65": (0, 1), "AQL 1.0": (1, 2), "AQL 1.5": (3, 4),
+    "J": {  # n=80
+        "AQL 0.65": (1, 2), "AQL 1.0": (2, 3), "AQL 1.5": (3, 4),
         "AQL 2.5": (5, 6), "AQL 4.0": (7, 8), "AQL 6.5": (10, 11)
     },
-    "H": {
-        "AQL 0.65": (1, 2), "AQL 1.0": (2, 3), "AQL 1.5": (5, 6),
+    "K": {  # n=125
+        "AQL 0.65": (2, 3), "AQL 1.0": (3, 4), "AQL 1.5": (5, 6),
         "AQL 2.5": (7, 8), "AQL 4.0": (10, 11), "AQL 6.5": (14, 15)
     },
-    "J": {
-        "AQL 0.65": (1, 2), "AQL 1.0": (3, 4), "AQL 1.5": (7, 8),
+    "L": {  # n=200
+        "AQL 0.65": (3, 4), "AQL 1.0": (5, 6), "AQL 1.5": (7, 8),
         "AQL 2.5": (10, 11), "AQL 4.0": (14, 15), "AQL 6.5": (21, 22)
     },
-    "K": {
-        "AQL 0.65": (2, 3), "AQL 1.0": (5, 6), "AQL 1.5": (10, 11),
+    "M": {  # n=315
+        "AQL 0.65": (5, 6), "AQL 1.0": (7, 8), "AQL 1.5": (10, 11),
         "AQL 2.5": (14, 15), "AQL 4.0": (21, 22), "AQL 6.5": (21, 22)
+    },
+    "N": {  # n=500
+        "AQL 0.65": (7, 8), "AQL 1.0": (10, 11), "AQL 1.5": (14, 15),
+        "AQL 2.5": (21, 22), "AQL 4.0": (21, 22), "AQL 6.5": (21, 22)
+    },
+    "P": {  # n=800
+        "AQL 0.65": (10, 11), "AQL 1.0": (14, 15), "AQL 1.5": (21, 22),
+        "AQL 2.5": (21, 22), "AQL 4.0": (21, 22), "AQL 6.5": (21, 22)
+    },
+    "Q": {  # n=1250
+        "AQL 0.65": (14, 15), "AQL 1.0": (21, 22), "AQL 1.5": (21, 22),
+        "AQL 2.5": (21, 22), "AQL 4.0": (21, 22), "AQL 6.5": (21, 22)
     },
 }
 
 def get_aql_sample_info(order_quantity, aql_value):
     """
-    根据订单数量和 AQL 值，查询样本量和 Ac/Re
+    根据订单数量和 AQL 值,查询样本量和 Ac/Re
     返回: (sample_size, sample_code, ac, re)
     """
     # 1. 查询样本量代码
@@ -96,14 +120,14 @@ def get_aql_sample_info(order_quantity, aql_value):
         if min_q <= order_quantity <= max_q:
             sample_code = code
             break
-    
+
     # 2. 查询样本量
     sample_size = AQL_SAMPLE_SIZE.get(sample_code, 50)
-    
+
     # 3. 查询 Ac/Re
     ac_re_table = AQL_AC_RE.get(sample_code, {})
     ac, rej = ac_re_table.get(aql_value, (0, 1))
-    
+
     return sample_size, sample_code, ac, rej
 
 # 导入认证和 IP 追踪函数
@@ -126,10 +150,10 @@ def clean_json_string(s):
     """清理 JSON 字符串中的常见格式问题"""
     if not s:
         return s
-    # 1. 移除末尾逗号（在 } 或 ] 之前）
+    # 1. 移除末尾逗号(在 } 或 ] 之前)
     s = re.sub(r',\s*([}\]])', r'\1', s)
-    # 2. 移除单引号包裹的字符串值（JSON 要求双引号）
-    # 这是一个保守的修复，只处理明显的单引号问题
+    # 2. 移除单引号包裹的字符串值(JSON 要求双引号)
+    # 这是一个保守的修复,只处理明显的单引号问题
     s = re.sub(r"(?<=:)\s*'([^']*)'", r'"\1"', s)
     return s
 
@@ -141,26 +165,26 @@ def extract_balanced_json(text):
     start_idx = text.find('{')
     if start_idx == -1:
         return None
-    
+
     depth = 0
     in_string = False
     escape_next = False
-    
+
     for i in range(start_idx, len(text)):
         ch = text[i]
-        
+
         if escape_next:
             escape_next = False
             continue
-        
+
         if ch == '\\':
             escape_next = True
             continue
-        
+
         if ch == '"' and not escape_next:
             in_string = not in_string
             continue
-        
+
         if not in_string:
             if ch == '{':
                 depth += 1
@@ -168,33 +192,33 @@ def extract_balanced_json(text):
                 depth -= 1
                 if depth == 0:
                     return text[start_idx:i+1]
-    
+
     return None
 
 def extract_json_robust(text):
     """
     从 AI 响应中鲁棒地提取并解析 JSON
-    
+
     返回: (success, result_or_error_message)
     """
     if not text or not text.strip():
         return False, "AI 返回了空内容"
-    
+
     raw_response = text
-    
+
     # ===== 策略1: 直接解析 =====
     try:
         result = json.loads(text)
         return True, result
     except json.JSONDecodeError:
         pass
-    
+
     # ===== 策略2: 提取 markdown 代码块 =====
     patterns = [
         r'```json\s*\n?(.*?)\n?\s*```',
         r'```\s*\n?(.*?)\n?\s*```',
     ]
-    
+
     for pattern in patterns:
         match = re.search(pattern, text, re.DOTALL)
         if match:
@@ -209,7 +233,7 @@ def extract_json_robust(text):
                     result = json.loads(cleaned)
                     return True, result
                 except json.JSONDecodeError:
-                    pass   
+                    pass
     # ===== 策略3: 括号平衡提取 =====
     json_str = extract_balanced_json(text)
     if json_str:
@@ -222,10 +246,10 @@ def extract_json_robust(text):
                 result = json.loads(cleaned)
                 return True, result
             except json.JSONDecodeError as e:
-                return False, f"JSON 解析失败：{str(e)}\n提取内容：{json_str[:200]}"    
+                return False, f"JSON 解析失败:{str(e)}\n提取内容:{json_str[:200]}"
     # ===== 所有策略都失败 =====
-    return False, f"无法解析 AI 返回的 JSON。原始响应前 200 字符：\n{raw_response[:200]}"
-# ===== 页面配置（必须在所有Streamlit调用之前）=====
+    return False, f"无法解析 AI 返回的 JSON。原始响应前 200 字符:\n{raw_response[:200]}"
+# ===== 页面配置(必须在所有Streamlit调用之前)=====
 st.set_page_config(
     page_title="外贸验货AI Agent - MVP",
     page_icon="📦",
@@ -245,14 +269,14 @@ MAX_FILE_SIZE_MB = 5  # 单个图片最大 5MB
 MAX_FILES = 10       # 最多上传 10 张图片
 API_TIMEOUT_SECONDS = 60  # API 调用超时时间
 # ===== 配置API客户端 =====
-# 优先级：通义千问VL > DeepSeek > OpenAI
+# 优先级:通义千问VL > DeepSeek > OpenAI
 def get_ai_client():
     """
-    获取AI客户端（通义千问/DeepSeek/OpenAI）
+    获取AI客户端(通义千问/DeepSeek/OpenAI)
     返回: (client, model_name) 或 (None, error_message)
     """
     try:
-        # 1. 优先使用通义千问VL（支持视觉，便宜）
+        # 1. 优先使用通义千问VL(支持视觉,便宜)
         qwen_key = st.secrets.get("qwen", {}).get("api_key")
         if qwen_key:
             client = openai.OpenAI(
@@ -260,8 +284,8 @@ def get_ai_client():
                 base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
                 timeout=httpx.Timeout(API_TIMEOUT_SECONDS, connect=10.0)
             )
-            return client, "qwen-vl-plus"        
-        # 2. 降级到DeepSeek（便宜，仅文本）
+            return client, "qwen-vl-plus"
+        # 2. 降级到DeepSeek(便宜,仅文本)
         deepseek_key = st.secrets.get("deepseek", {}).get("api_key")
         if deepseek_key:
             client = openai.OpenAI(
@@ -269,21 +293,21 @@ def get_ai_client():
                 base_url="https://api.deepseek.com",
                 timeout=httpx.Timeout(API_TIMEOUT_SECONDS, connect=10.0)
             )
-            return client, "deepseek-chat"        
-        # 3. 降级到OpenAI（贵，但稳定）
+            return client, "deepseek-chat"
+        # 3. 降级到OpenAI(贵,但稳定)
         openai_key = st.secrets.get("openai", {}).get("api_key", os.getenv("OPENAI_API_KEY"))
         if openai_key:
             client = openai.OpenAI(
                 api_key=openai_key,
                 timeout=httpx.Timeout(API_TIMEOUT_SECONDS, connect=10.0)
             )
-            return client, "gpt-4o"        
+            return client, "gpt-4o"
         # 未配置任何 API Key
-        return None, "未配置API Key，请在 Streamlit Cloud Secrets 中配置 qwen/deepseek/openai 的 api_key"    
+        return None, "未配置API Key,请在 Streamlit Cloud Secrets 中配置 qwen/deepseek/openai 的 api_key"
     except Exception as e:
-        return None, f"API客户端初始化失败：{str(e)}"
+        return None, f"API客户端初始化失败:{str(e)}"
 def check_api_available():
-    """检查 API 是否可用，返回 (is_available, error_message)"""
+    """检查 API 是否可用,返回 (is_available, error_message)"""
     client, result = get_ai_client()
     if client:
         return True, None
@@ -297,16 +321,16 @@ def validate_uploaded_file(uploaded_file):
     """
     # 检查文件类型
     if uploaded_file.type not in ["image/jpeg", "image/jpg", "image/png"]:
-        return False, f"不支持的文件格式：{uploaded_file.name}（仅支持 JPG/PNG）"
-    
+        return False, f"不支持的文件格式:{uploaded_file.name}(仅支持 JPG/PNG)"
+
     # 检查文件大小
     file_size_mb = len(uploaded_file.getvalue()) / (1024 * 1024)
     if file_size_mb > MAX_FILE_SIZE_MB:
-        return False, f"文件过大：{uploaded_file.name}（{file_size_mb:.1f}MB > {MAX_FILE_SIZE_MB}MB）"    
+        return False, f"文件过大:{uploaded_file.name}({file_size_mb:.1f}MB > {MAX_FILE_SIZE_MB}MB)"
     return True, None
 def check_image_quality(uploaded_file):
     """
-    检查图片质量：尺寸、模糊度、亮度
+    检查图片质量:尺寸、模糊度、亮度
     返回: (quality_score, warnings)
     quality_score: 0-100
     warnings: 字符串列表
@@ -314,39 +338,39 @@ def check_image_quality(uploaded_file):
     warnings = []
     score = 100
     img = None
-    
+
     try:
         image_bytes = uploaded_file.getvalue()
         img = Image.open(io.BytesIO(image_bytes))
         img.verify()  # 验证图片格式
         img = Image.open(io.BytesIO(image_bytes))  # verify 后需要重新打开
     except Exception as e:
-        return 0, [f"无法读取图片：{str(e)}"]
-    
+        return 0, [f"无法读取图片:{str(e)}"]
+
     width, height = img.size
-    
+
     # 1. 尺寸检查
     min_size = min(width, height)
     if min_size < 800:
-        warnings.append(f"图片尺寸较小（{width}x{height}），建议至少 800x800 像素")
+        warnings.append(f"图片尺寸较小({width}x{height}),建议至少 800x800 像素")
         score -= 15
     elif min_size < 1200:
-        warnings.append(f"图片清晰度一般（{width}x{height}），建议拍摄更清晰的图片")
+        warnings.append(f"图片清晰度一般({width}x{height}),建议拍摄更清晰的图片")
         score -= 5
-    
+
     # 2. 亮度检查
     grayscale = img.convert("L")
     stat = ImageStat.Stat(grayscale)
     brightness = stat.mean[0]
-    
+
     if brightness < 50:
-        warnings.append("图片太暗，可能导致缺陷识别失败")
+        warnings.append("图片太暗,可能导致缺陷识别失败")
         score -= 20
     elif brightness > 240:
-        warnings.append("图片过曝，细节可能丢失")
+        warnings.append("图片过曝,细节可能丢失")
         score -= 10
-    
-    # 3. 模糊检测（需要 numpy）
+
+    # 3. 模糊检测(需要 numpy)
     try:
         gray_array = np.array(grayscale)
         # 拉普拉斯方差
@@ -356,71 +380,150 @@ def check_image_quality(uploaded_file):
                 - 4 * gray_array[1:-1, 1:-1]
             ]).flatten()
         )
-        
+
         if laplacian_var < 50:
-            warnings.append("图片模糊，建议重新对焦拍摄")
+            warnings.append("图片模糊,建议重新对焦拍摄")
             score -= 25
         elif laplacian_var < 100:
-            warnings.append("图片 slightly 模糊，建议拍摄更清楚")
+            warnings.append("图片 slightly 模糊,建议拍摄更清楚")
             score -= 10
     except Exception:
         pass  # 模糊检测失败不影响主流程
-    
+
     # 4. 宽高比检查
     ratio = max(width, height) / min(width, height)
     if ratio > 3:
-        warnings.append("图片过于细长，建议拍摄更接近正方形的角度")
+        warnings.append("图片过于细长,建议拍摄更接近正方形的角度")
         score -= 5
     return max(0, score), warnings
 # ===== AI分析函数 =====
-def analyze_product_images(uploaded_files, product_name, inspection_standard):
+def _format_acre_hint(acre):
+    """将三层真实 Ac/Re 格式化为注入 AI prompt 的文本提示"""
+    if not acre:
+        return ""
+    c, m, n = acre.get("critical", {}), acre.get("major", {}), acre.get("minor", {})
+    ss = c.get("sample_size", "?")
+    return (
+        f"\n【本次抽样方案】抽样数量:{ss} 件\n"
+        f"- 致命缺陷 {c.get('aql','')}:接收数 Ac={c.get('ac',0)}(缺陷数≤{c.get('ac',0)}通过)\n"
+        f"- 主要缺陷 {m.get('aql','')}:接收数 Ac={m.get('ac',0)}(缺陷数≤{m.get('ac',0)}通过)\n"
+        f"- 次要缺陷 {n.get('aql','')}:接收数 Ac={n.get('ac',0)}(缺陷数≤{n.get('ac',0)}通过)\n"
+    )
+
+
+def compute_three_layer_acre(order_quantity, aql_critical, aql_major, aql_minor):
+    """
+    根据订单数量和三层 AQL 值,分别计算每层的真实 Ac/Re。
+    返回: {"critical": {"aql":.., "ac":.., "re":.., "sample_size":..}, "major":..., "minor":...}
+    """
+    layers = {}
+    for key, aql in (("critical", aql_critical), ("major", aql_major), ("minor", aql_minor)):
+        sample_size, sample_code, ac, rej = get_aql_sample_info(order_quantity, aql)
+        layers[key] = {
+            "aql": aql,
+            "ac": ac,
+            "re": rej,
+            "sample_size": sample_size,
+            "sample_code": sample_code,
+        }
+    return layers
+
+
+def judge_three_layer(defects, acre):
+    """
+    基于 AI 识别的缺陷列表 + 真实 Ac/Re,确定性地得出三层判定与总结论。
+    返回: (three_layer_result, conclusion)
+    """
+    sev_map = {"致命": "critical", "主要": "major", "次要": "minor"}
+    counts = {"critical": 0, "major": 0, "minor": 0}
+    for d in (defects or []):
+        sev = d.get("severity", "次要")
+        layer = sev_map.get(sev)
+        if layer:
+            try:
+                counts[layer] += int(d.get("quantity", 1) or 1)
+            except (TypeError, ValueError):
+                counts[layer] += 1
+
+    three_layer_result = {}
+    all_passed = True
+    conditional = False
+    for layer in ("critical", "major", "minor"):
+        info = acre.get(layer, {})
+        ac = info.get("ac", 0)
+        # 致命缺陷零容忍：不论抽样表 Ac 为多少，发现任何致命缺陷即不合格（验货行业惯例）
+        if layer == "critical":
+            ac = 0
+        cnt = counts[layer]
+        passed = cnt <= ac
+        if not passed:
+            all_passed = False
+        # 临界:次要层刚好等于 Ac(未超但已到上限)且 Ac>0
+        if layer == "minor" and passed and ac > 0 and cnt == ac:
+            conditional = True
+        three_layer_result[layer] = {
+            "passed": passed,
+            "aql": info.get("aql", ""),
+            "defect_count": cnt,
+            "ac": ac,
+            "re": info.get("re", ac + 1),
+        }
+
+    if not all_passed:
+        conclusion = "不合格"
+    elif conditional:
+        conclusion = "有条件接受"
+    else:
+        conclusion = "合格"
+    return three_layer_result, conclusion
+
+
+def analyze_product_images(uploaded_files, product_name, inspection_standard, acre=None):
     """
     调用 AI Vision API 分析产品图片
     返回: (success, result_or_error_message)
+    acre: compute_three_layer_acre() 的返回值,用于向 AI 注入真实 Ac/Re 并做最终判定
     """
     # 1. 检查 API 可用性
     api_available, api_error = check_api_available()
     if not api_available:
-        return False, f"API 不可用：{api_error}"
-    
+        return False, f"API 不可用:{api_error}"
+
     # 2. 校验输入
     if not uploaded_files:
         return False, "请至少上传1张产品照片"
     if not product_name or not product_name.strip():
         return False, "请填写产品名称"
-    
+
     try:
         client, model_name = get_ai_client()
-        
+
         # 3. 构建消息
         messages = [
             {
 "role": "system",
-"content": """你是一位拥有15年经验的外贸验货专家，精通ISO 2859-1/2抽样标准、AQL质量标准（AQL 0.65/1.0/1.5/2.5/4.0/6.5），熟悉电子产品、纺织品、机械配件、玩具等各类产品的国际质量标准（ISO、ASTM、GB、EN等）。
-你的任务是根据用户上传的产品图片和指定的AQL标准，进行专业的质量检验分析。
+"content": """你是一位拥有15年经验的外贸验货专家,精通ISO 2859-1/2抽样标准、AQL质量标准(AQL 0.65/1.0/1.5/2.5/4.0/6.5),熟悉电子产品、纺织品、机械配件、玩具等各类产品的国际质量标准(ISO、ASTM、GB、EN等)。
+你的任务是根据用户上传的产品图片和指定的AQL标准,进行专业的质量检验分析。
 
-用户上传了多张图片，按顺序编号为：图1、图2、图3...。
-在描述缺陷时，请用"图1"、"图2"这样的编号指明缺陷出现在哪张图片中。
+用户上传了多张图片,按顺序编号为:图1、图2、图3...。
+在描述缺陷时,请用"图1"、"图2"这样的编号指明缺陷出现在哪张图片中。
 
 【AQL三层抽样标准】
-用户会提供一个三层AQL标准，格式为："致命:AQL X.X / 主要:AQL Y.Y / 次要:AQL Z.Z"
+用户会提供一个三层AQL标准,格式为:"致命:AQL X.X / 主要:AQL Y.Y / 次要:AQL Z.Z"
 
-请根据缺陷严重程度分类：
-1. **致命缺陷 (Critical)**：安全风险、违法、危及生命 - 使用 AQL X.X 判定
-2. **主要缺陷 (Major)**：功能失效、影响使用、关键尺寸偏差 - 使用 AQL Y.Y 判定
-3. **次要缺陷 (Minor)**：外观瑕疵、不影响功能、包装问题 - 使用 AQL Z.Z 判定
+请根据缺陷严重程度分类:
+1. **致命缺陷 (Critical)**:安全风险、违法、危及生命 - 使用 AQL X.X 判定
+2. **主要缺陷 (Major)**:功能失效、影响使用、关键尺寸偏差 - 使用 AQL Y.Y 判定
+3. **次要缺陷 (Minor)**:外观瑕疵、不影响功能、包装问题 - 使用 AQL Z.Z 判定
 
-【三层判定标准】
-- 致命缺陷（AQL X.X）：无致命缺陷 → 通过；存在任何致命缺陷 → 不通过
-- 主要缺陷（AQL Y.Y）：主要缺陷≤2个 → 通过；主要缺陷>2个 → 不通过
-- 次要缺陷（AQL Z.Z）：次要缺陷≤5个 → 通过；次要缺陷>5个 → 不通过
+【三层判定标准--基于真实 AQL 抽样方案】
+判定依据 ANSI/ASQ Z1.4 抽样表的接收数 Ac:某层缺陷总数 ≤ Ac → 该层通过;> Ac → 不通过。
+(具体 Ac 数值会在下方用户消息中给出,请客观识别并统计缺陷数量,不要自己冇断合格与否。)
 
 【最终结论】
-- 合格：三层全部通过
-- 不合格：任何一层不通过
-- 有条件接受：次要缺陷层临界（如3-4个次要缺陷）
+你只需按格式返回每个缺陷的严重程度与数量;最终合格/不合格由系统根据真实 Ac/Re 计算,three_layer_result 的 passed 字段你可估算填写。
 
-【输出格式要求】必须严格按以下JSON格式返回：
+【输出格式要求】必须严格按以下JSON格式返回:
 {
   "conclusion": "合格/不合格/有条件接受",
   "three_layer_result": {
@@ -431,22 +534,22 @@ def analyze_product_images(uploaded_files, product_name, inspection_standard):
   "defects": [
     {
       "type": "划痕/变形/色差/功能异常/包装破损等",
-      "quantity": 数字（必须是整数）,      
+      "quantity": 数字(必须是整数),
       "severity": "致命/主要/次要",
-      "description": "详细描述缺陷位置、大小、程度（50字以内）",
+      "description": "详细描述缺陷位置、大小、程度(50字以内)",
       "image": "图1 / 图2 / 图3"
     }
   ],
-  "recommendation": "处理建议（100字以内）",
+  "recommendation": "处理建议(100字以内)",
   "confidence": 0.0-1.0
 }
 
 【注意事项】
-[注意] quantity字段必须是整数数字，禁止使用"若干"、"一些"、"多个"等模糊词汇
-[注意] 请确保输出标准 JSON 格式，不要使用尾逗号，字符串使用双引号
-[注意] 如果图片不清晰，description中注明"图片模糊，无法准确判断"
+[注意] quantity字段必须是整数数字,禁止使用"若干"、"一些"、"多个"等模糊词汇
+[注意] 请确保输出标准 JSON 格式,不要使用尾逗号,字符串使用双引号
+[注意] 如果图片不清晰,description中注明"图片模糊,无法准确判断"
 [注意] 不要编造图片中不存在的缺陷
-[注意] 如果未发现缺陷，defects数组设为空 []
+[注意] 如果未发现缺陷,defects数组设为空 []
 """
             },
             {
@@ -454,19 +557,23 @@ def analyze_product_images(uploaded_files, product_name, inspection_standard):
                 "content": [
                     {
                         "type": "text",
-                        "text": f"请分析这款产品：{product_name}\n验货标准：{inspection_standard}\n\n请识别图片中的缺陷，输出JSON格式结果。"
+                        "text": (
+                            f"请分析这款产品:{product_name}\n验货标准:{inspection_standard}\n"
+                            + (_format_acre_hint(acre) if acre else "")
+                            + "\n请识别图片中的缺陷,输出JSON格式结果。"
+                        )
                     }
                 ]
             }
         ]
-        
+
         # 4. 添加图片
         for uploaded_file in uploaded_files:
-            # 图片按上传顺序编号，AI 在分析时引用 "图1/图2/图3" 对应缺陷
+            # 图片按上传顺序编号,AI 在分析时引用 "图1/图2/图3" 对应缺陷
             try:
                 image_bytes = uploaded_file.getvalue()
                 image_b64 = base64.b64encode(image_bytes).decode('utf-8')
-                
+
                 messages[1]["content"].append({
                     "type": "image_url",
                     "image_url": {
@@ -474,8 +581,8 @@ def analyze_product_images(uploaded_files, product_name, inspection_standard):
                     }
                 })
             except Exception as img_error:
-                return False, f"图片处理失败：{uploaded_file.name} - {str(img_error)}"
-        
+                return False, f"图片处理失败:{uploaded_file.name} - {str(img_error)}"
+
         # 5. 调用 API
         try:
             response = client.chat.completions.create(
@@ -485,26 +592,26 @@ def analyze_product_images(uploaded_files, product_name, inspection_standard):
                 temperature=0.3
             )
         except openai.APIConnectionError:
-            return False, "网络连接失败，请检查网络后重试"
+            return False, "网络连接失败,请检查网络后重试"
         except openai.APITimeoutError:
-            return False, f"API 调用超时（{API_TIMEOUT_SECONDS}秒），请稍后重试"
+            return False, f"API 调用超时({API_TIMEOUT_SECONDS}秒),请稍后重试"
         except openai.RateLimitError:
-            return False, "API 调用频率超限，请等待1分钟后重试"
+            return False, "API 调用频率超限,请等待1分钟后重试"
         except openai.AuthenticationError:
-            return False, "API Key 认证失败，请检查密钥是否正确"
+            return False, "API Key 认证失败,请检查密钥是否正确"
         except openai.APIStatusError as e:
-            return False, f"API 错误：{e.message}（状态码：{e.status_code}）"
-        
-        # 6. 解析响应（使用增强版解析器）
+            return False, f"API 错误:{e.message}(状态码:{e.status_code})"
+
+        # 6. 解析响应(使用增强版解析器)
         ai_response = response.choices[0].message.content
-        
-        # 使用增强版 JSON 解析（支持多层 fallback）
+
+        # 使用增强版 JSON 解析(支持多层 fallback)
         success, result = extract_json_robust(ai_response)
-        
+
         if not success:
             return False, result
-        
-        # 7. 解析 JSON（支持 markdown 代码块包裹）
+
+        # 7. 解析 JSON(支持 markdown 代码块包裹)
         try:
             result = json.loads(ai_response)
         except json.JSONDecodeError:
@@ -520,7 +627,7 @@ def analyze_product_images(uploaded_files, product_name, inspection_standard):
                     if json_match2:
                         result = json.loads(json_match2.group())
                     else:
-                        return False, f"AI 返回格式错误，无法解析 JSON。原始响应：{ai_response[:200]}..."
+                        return False, f"AI 返回格式错误,无法解析 JSON。原始响应:{ai_response[:200]}..."
             else:
                 # 尝试直接提取 {...}
                 json_match3 = re.search(r'\{.*\}', ai_response, re.DOTALL)
@@ -528,20 +635,20 @@ def analyze_product_images(uploaded_files, product_name, inspection_standard):
                     try:
                         result = json.loads(json_match3.group())
                     except json.JSONDecodeError:
-                        return False, f"AI 返回格式错误，无法解析 JSON。原始响应：{ai_response[:200]}..."
+                        return False, f"AI 返回格式错误,无法解析 JSON。原始响应:{ai_response[:200]}..."
                 else:
-                    return False, f"AI 返回格式错误，未找到 JSON 内容。原始响应：{ai_response[:200]}..."
-        
+                    return False, f"AI 返回格式错误,未找到 JSON 内容。原始响应:{ai_response[:200]}..."
+
         # 8. 校验必需字段
         required_fields = ["conclusion", "defects", "recommendation"]
         for field in required_fields:
             if field not in result:
-                return False, f"AI 返回数据缺少必需字段：{field}"
-        
+                return False, f"AI 返回数据缺少必需字段:{field}"
+
         # 9. 校验 defects 格式
         if not isinstance(result["defects"], list):
-            return False, "AI 返回的 defects 字段格式错误（应为数组）"
-        
+            return False, "AI 返回的 defects 字段格式错误(应为数组)"
+
         for idx, defect in enumerate(result["defects"]):
             if not isinstance(defect, dict):
                 return False, f"缺陷 #{idx+1} 格式错误"
@@ -551,46 +658,52 @@ def analyze_product_images(uploaded_files, product_name, inspection_standard):
             defect.setdefault("severity", "未知")
             defect.setdefault("description", "")
             defect.setdefault("image", "")
-        
+
         # 10. 填充其他可选字段
         result.setdefault("confidence", 0.5)
-        
+
+        # 11. 【关键】基于真实 Ac/Re 确定性重算三层判定与总结论,覆盖 AI 冇断
+        if acre:
+            three_layer_result, conclusion = judge_three_layer(result.get("defects", []), acre)
+            result["three_layer_result"] = three_layer_result
+            result["conclusion"] = conclusion
+
         return True, result
-    
+
     except Exception as e:
-        return False, f"AI 分析过程发生未知错误：{str(e)}"
+        return False, f"AI 分析过程发生未知错误:{str(e)}"
 # ===== 辅助函数 =====
 def load_usage_count():
-    """从 query_params 加载持久化的使用计数（永久累计，不重置）"""
+    """从 query_params 加载持久化的使用计数(永久累计,不重置)"""
     saved_count = st.query_params.get("total_usage_count", "0")
-    
+
     try:
         saved_count = int(saved_count)
     except:
         saved_count = 0
-    
+
     return saved_count
 
 def save_usage_count(count):
-    """持久化使用计数到 query_params（永久累计）"""
+    """持久化使用计数到 query_params(永久累计)"""
     try:
         st.query_params["total_usage_count"] = str(count)
     except:
         pass  # query_params 写入失败时静默处理
 
 def get_client_ip():
-    """获取稳定的客户端标识（跨浏览器重启保持一致）"""
+    """获取稳定的客户端标识(跨浏览器重启保持一致)"""
     import time
     import hashlib
     import random
-    
-    # 方法1: 通过外部API获取真实公网IP（最可靠）
+
+    # 方法1: 通过外部API获取真实公网IP(最可靠)
     try:
         import urllib.request
         with urllib.request.urlopen("https://api.ipify.org", timeout=3) as response:
             ip = response.read().decode("utf-8")
             if ip and ip != "127.0.0.1":
-                # 验证成功：同时保存到 query_params 备份（防止后续获取失败）
+                # 验证成功:同时保存到 query_params 备份(防止后续获取失败)
                 try:
                     st.query_params["_real_ip"] = ip
                 except:
@@ -598,7 +711,7 @@ def get_client_ip():
                 return ip
     except:
         pass
-    
+
     # 方法2: 备用API
     try:
         import urllib.request
@@ -613,8 +726,8 @@ def get_client_ip():
                 return ip
     except:
         pass
-    
-    # 方法3: 尝试从headers获取（本地开发/Streamlit Cloud）
+
+    # 方法3: 尝试从headers获取(本地开发/Streamlit Cloud)
     try:
         headers = st.context.headers
         forwarded = headers.get("X-Forwarded-For", "")
@@ -625,18 +738,18 @@ def get_client_ip():
             return real_ip
     except:
         pass
-    
+
     # 方法4: Fallback - 使用 query_params 持久化的 client_id
-    # 【关键修复】之前用 session_state，关闭浏览器后丢失
-    # 现在用 query_params，URL 里的参数在浏览器重启后仍然保留
+    # 【关键修复】之前用 session_state,关闭浏览器后丢失
+    # 现在用 query_params,URL 里的参数在浏览器重启后仍然保留
     try:
         query_params = st.query_params
         if "_client_id" in query_params:
             return f"browser_{query_params['_client_id']}"
     except:
         pass
-    
-    # 第一次访问（或者 query_params 读取失败）: 生成新ID并持久化
+
+    # 第一次访问(或者 query_params 读取失败): 生成新ID并持久化
     new_id = hashlib.md5(
         f"{time.time()}{random.random()}".encode()
     ).hexdigest()[:16]
@@ -648,9 +761,9 @@ def get_client_ip():
 
 def check_ip_blacklist():
     """
-    检查当前 IP 是否在黑名单中（功能暂未启用）
+    检查当前 IP 是否在黑名单中(功能暂未启用)
     """
-    # 黑名单功能暂未实现，直接返回
+    # 黑名单功能暂未实现,直接返回
     return
 
 def get_remaining():
@@ -665,14 +778,14 @@ def get_remaining():
         return st.session_state["inspection_limit"] - effective_count
 
 def is_limit_reached():
-    """检查是否达到使用次数限制（本地 + IP 双重检查）"""
+    """检查是否达到使用次数限制(本地 + IP 双重检查)"""
     user = st.session_state.get("user")
     if user:
         return user["inspection_count"] >= user["inspection_limit"]
     else:
         # 本地计数
         local_count = st.session_state["inspection_count"]
-        # IP 计数（Supabase 持久化，跨浏览器有效）
+        # IP 计数(Supabase 持久化,跨浏览器有效)
         ip_count = st.session_state.get("ip_usage_count", 0)
         # 取两者较大值
         effective_count = max(local_count, ip_count)
@@ -698,29 +811,29 @@ def get_inspection_limit():
 def show_auth_ui():
     """显示登录/注册表单"""
     st.subheader("用户登录")
-    
+
     # Tab 切换
     tab1, tab2 = st.tabs(["登录", "注册"])
-    
+
     with tab1:
         login_email = st.text_input("邮箱", key="login_email", placeholder="your@email.com")
         login_password = st.text_input("密码", type="password", key="login_pwd", placeholder="输入密码")
-        
+
         if st.button("登录", type="primary", use_container_width=True):
             if not login_email or not login_password:
                 st.error("请填写邮箱和密码")
             else:
-                # 【关键修复】登录时传入本地已使用次数，合并到数据库
+                # 【关键修复】登录时传入本地已使用次数,合并到数据库
                 local_count = st.session_state.get("inspection_count", 0)
                 success, msg, user_data, needs_verification = sign_in(login_email, login_password, local_count)
                 if success:
                     st.session_state["user"] = user_data
-                    # 【关键修复】登录成功后清除本地计数（已合并到数据库）
+                    # 【关键修复】登录成功后清除本地计数(已合并到数据库)
                     st.session_state["inspection_count"] = user_data.get("inspection_count", 0)
                     # 【关键修复】同步导出次数到 session_state
                     st.session_state["export_count"] = user_data.get("export_count", 0)
                     try:
-                        # 清除 URL 参数中的旧计数，避免登录后混淆
+                        # 清除 URL 参数中的旧计数,避免登录后混淆
                         if "total_usage_count" in st.query_params:
                             del st.query_params["total_usage_count"]
                     except:
@@ -729,20 +842,20 @@ def show_auth_ui():
                 else:
                     st.error(msg)
                     if needs_verification:
-                        st.info("📧 您的邮箱还未验证，请查收验证邮件（包括垃圾邮件文件夹）")
-                        if st.button("🔄 没收到？重新发送验证邮件", key="resend_login_btn"):
+                        st.info("📧 您的邮箱还未验证,请查收验证邮件(包括垃圾邮件文件夹)")
+                        if st.button("🔄 没收到?重新发送验证邮件", key="resend_login_btn"):
                             rs, rm = resend_verification_email(login_email)
                             if rs:
                                 st.success(rm)
                             else:
                                 st.error(rm)
-    
+
     with tab2:
         reg_email = st.text_input("邮箱", key="reg_email", placeholder="your@email.com")
-        reg_name = st.text_input("昵称（可选）", key="reg_name", placeholder="如何称呼您？")
+        reg_name = st.text_input("昵称(可选)", key="reg_name", placeholder="如何称呼您?")
         reg_password = st.text_input("密码", type="password", key="reg_pwd", placeholder="至少6位字符")
         reg_confirm = st.text_input("确认密码", type="password", key="reg_confirm", placeholder="再次输入密码")
-        
+
         if st.button("注册", type="primary", use_container_width=True):
             if not reg_email or not reg_password:
                 st.error("请填写邮箱和密码")
@@ -754,20 +867,20 @@ def show_auth_ui():
                 success, msg, user_data, needs_verification = sign_up(reg_email, reg_password, reg_name)
                 if success:
                     if needs_verification:
-                        # 真实模式：需要邮箱验证
+                        # 真实模式:需要邮箱验证
                         st.success(msg)
-                        st.info("📧 请前往您的邮箱点击验证链接（可能需要 1-2 分钟）")
-                        if st.button("🔄 没收到？重新发送验证邮件", key="resend_reg_btn"):
+                        st.info("📧 请前往您的邮箱点击验证链接(可能需要 1-2 分钟)")
+                        if st.button("🔄 没收到?重新发送验证邮件", key="resend_reg_btn"):
                             rs, rm = resend_verification_email(reg_email)
                             if rs:
                                 st.success(rm)
                             else:
                                 st.error(rm)
                     else:
-                        # 已验证或免验证：直接登录
+                        # 已验证或免验证:直接登录
                         if user_data:
                             st.session_state["user"] = user_data
-                            # 【关键修复】登录成功后清除本地计数（已合并到数据库）
+                            # 【关键修复】登录成功后清除本地计数(已合并到数据库)
                             st.session_state["inspection_count"] = user_data.get("inspection_count", 0)
                             # 【关键修复】同步导出次数到 session_state
                             st.session_state["export_count"] = user_data.get("export_count", 0)
@@ -776,14 +889,14 @@ def show_auth_ui():
                                     del st.query_params["total_usage_count"]
                             except:
                                 pass
-                            st.info("✅ 已自动登录，可以开始使用了！")
+                            st.info("✅ 已自动登录,可以开始使用了!")
                             st.balloons()
                             st.rerun()
                 else:
                     st.error(msg)
-    
+
     st.markdown("---")
-    st.caption("💡 提示：注册后请查收验证邮件（可能需要 1-2 分钟），点击邮件中的链接完成验证后即可登录")
+    st.caption("💡 提示:注册后请查收验证邮件(可能需要 1-2 分钟),点击邮件中的链接完成验证后即可登录")
 def show_user_info():
     """显示已登录用户信息"""
     user = st.session_state.get("user")
@@ -794,7 +907,7 @@ def show_user_info():
         st.caption(f"已使用 {user['inspection_count']} / {user['inspection_limit']} 次")
         st.markdown("---")
 # ===== 初始化session_state =====
-# inspection_count 已在下方 IP 追踪块中初始化（取 max(本地, IP)）
+# inspection_count 已在下方 IP 追踪块中初始化(取 max(本地, IP))
 if "inspection_limit" not in st.session_state:
     st.session_state["inspection_limit"] = 5
 if "inspection_history" not in st.session_state:
@@ -809,26 +922,26 @@ if "analysis_error" not in st.session_state:
     st.session_state["analysis_error"] = None
 if "last_raw_ai_response" not in st.session_state:
     st.session_state["last_raw_ai_response"] = None
-# PDF 导出次数限制（注册用户最多5次）
+# PDF 导出次数限制(注册用户最多5次)
 if "export_count" not in st.session_state:
     st.session_state["export_count"] = 0
-# 已导出报告ID集合（防止重复计数）
+# 已导出报告ID集合(防止重复计数)
 if "exported_reports" not in st.session_state:
     st.session_state["exported_reports"] = set()
 supabase_ready = is_supabase_configured()
 
-# 先初始化 inspection_count（从 query_params）
+# 先初始化 inspection_count(从 query_params)
 if "inspection_count" not in st.session_state:
     st.session_state["inspection_count"] = load_usage_count()
 
-# 加载 Supabase IP 追踪（防换浏览器白嫖）
+# 加载 Supabase IP 追踪(防换浏览器白嫖)
 if "ip_usage_loaded" not in st.session_state:
     st.session_state["ip_usage_loaded"] = True
     if supabase_ready:
         client_ip = get_client_ip()
         ip_count = get_ip_usage(client_ip)
         st.session_state["ip_usage_count"] = ip_count
-        # 关键修复：本地计数取 max(本地, IP)，防止关闭重置
+        # 关键修复:本地计数取 max(本地, IP),防止关闭重置
         st.session_state["inspection_count"] = max(st.session_state["inspection_count"], ip_count)
         save_usage_count(st.session_state["inspection_count"])
     else:
@@ -848,40 +961,40 @@ with st.sidebar:
         "上传产品照片 → AI分析 → 生成验货报告"
     )
     st.markdown("---")
-    
+
     # 用户信息
     show_user_info()
-    
+
     # 未登录用户可选登录
     if not st.session_state.get("user"):
-        with st.expander("登录/注册（可选）"):
+        with st.expander("登录/注册(可选)"):
             show_auth_ui()
-    
+
     # 使用统计
     remaining = get_remaining()
     st.subheader("使用统计")
     st.metric("已使用次数", f"{get_inspection_count()} 次")
     st.metric("剩余次数", f"{remaining} 次")
-    
+
     if remaining <= 2:
         st.warning(f"剩余次数不多")
-    
+
     st.caption(f"每用户 {get_inspection_limit()} 次")
-    
-    # 安全信息（仅管理员可见）
+
+    # 安全信息(仅管理员可见)
     client_ip = get_client_ip()
     if client_ip != "unknown":
         st.caption(f"IP: {client_ip}")
     st.markdown("---")
-    
+
     # ROI展示
     if st.session_state["inspection_history"]:
         st.subheader("您的节省统计")
         st.metric("累计验货次数", f"{len(st.session_state['inspection_history'])} 次")
-        st.metric("累计节省金额", f"￥{st.session_state['total_savings']:,.0f}")
-        st.caption("每次AI验货约节省￥200-500人工成本")
+        st.metric("累计节省金额", f"¥{st.session_state['total_savings']:,.0f}")
+        st.caption("每次AI验货约节省¥200-500人工成本")
         st.markdown("---")
-    
+
     # 退出登录
     if st.button("退出登录"):
         sign_out()
@@ -889,27 +1002,27 @@ with st.sidebar:
         st.session_state["inspection_history"] = []
         st.session_state["total_savings"] = 0
         st.rerun()
-    
+
     st.markdown("---")
-    st.caption(f"版本：0.3.2 (MVP)")
-    st.caption(f"更新时间：2026-06-18")
+    st.caption(f"版本:0.3.2 (MVP)")
+    st.caption(f"更新时间:2026-06-18")
 
 # 主界面
 col1, col2 = st.columns([1, 1])
 
 with col1:
     st.subheader("1. 上传产品照片")
-    
+
     # 检查 API 可用性
     api_available, api_error = check_api_available()
     if not api_available:
-        st.error(f"API 不可用：{api_error}")
+        st.error(f"API 不可用:{api_error}")
         st.info("请联系管理员配置 API Key")
         uploaded_files = None
     else:
-        with st.expander("拍照指南（点击展开）", expanded=True):
+        with st.expander("拍照指南(点击展开)", expanded=True):
             col_guide1, col_guide2 = st.columns(2)
-            
+
             with col_guide1:
                 st.markdown("**正确示范**")
                 correct_img_path = os.path.join(os.path.dirname(__file__), "example_images", "correct.jpg")
@@ -917,7 +1030,7 @@ with col1:
                     st.image(correct_img_path, caption="光线充足、45°角、清晰", use_column_width=True)
                 else:
                     st.info("光线充足\n45°角拍摄\n缺陷细节清晰")
-            
+
             with col_guide2:
                 st.markdown("**错误示范**")
                 wrong_img_path = os.path.join(os.path.dirname(__file__), "example_images", "wrong.jpg")
@@ -925,73 +1038,73 @@ with col1:
                     st.image(wrong_img_path, caption="光线暗、距离远、模糊", use_column_width=True)
                 else:
                     st.error("光线太暗\n距离太远\n模糊不清")
-            
+
             st.markdown("---")
             st.markdown(f"""
-            **必须拍摄的照片类型：**
-            1. **整体图** — 产品完整外观，至少1张
-            2. **细节图** — 缺陷或关键部位特写
-            3. **标签/包装图** — 产品标签、包装、条码        
-            **建议：**
-            - 光线充足，不要逆光
+            **必须拍摄的照片类型:**
+            1. **整体图** - 产品完整外观,至少1张
+            2. **细节图** - 缺陷或关键部位特写
+            3. **标签/包装图** - 产品标签、包装、条码
+            **建议:**
+            - 光线充足,不要逆光
             - 每张图只聚焦1个产品/1个缺陷
             - 单张图片不超过 {MAX_FILE_SIZE_MB}MB
             """)
             st.markdown("""
-            **上传建议：**
-            - 按顺序上传：整体外观 → 缺陷细节 → 标签/包装
+            **上传建议:**
+            - 按顺序上传:整体外观 → 缺陷细节 → 标签/包装
             - 建议上传 3-6 张不同角度的照片
             - 上传后可删除不需要的照片
             """)
 
         uploaded_files = st.file_uploader(
-            f"选择产品照片（最多{MAX_FILES}张，每张≤{MAX_FILE_SIZE_MB}MB）",
+            f"选择产品照片(最多{MAX_FILES}张,每张≤{MAX_FILE_SIZE_MB}MB)",
             type=['jpg', 'jpeg', 'png'],
             accept_multiple_files=True,
             disabled=is_limit_reached()
         )
-        
+
     # 文件校验
     if uploaded_files:
         if len(uploaded_files) > MAX_FILES:
-            st.error(f"上传图片数量超限：{len(uploaded_files)} 张 > {MAX_FILES} 张")
+            st.error(f"上传图片数量超限:{len(uploaded_files)} 张 > {MAX_FILES} 张")
             uploaded_files = None
         else:
             valid_files = []
             quality_issues = []
             has_error = False
-        
+
         for file in uploaded_files:
-            # 基础校验（格式、大小）
+            # 基础校验(格式、大小)
             is_valid, error_msg = validate_uploaded_file(file)
             if not is_valid:
                 st.error(error_msg)
                 has_error = True
                 continue
-            
+
             # 质量检查
             quality_score, warnings = check_image_quality(file)
             if quality_score < 60:
-                # 质量太差，直接拒绝
-                quality_issues.append(f"#{file.name} 质量评分 {quality_score} 分，建议重新拍摄")
+                # 质量太差,直接拒绝
+                quality_issues.append(f"#{file.name} 质量评分 {quality_score} 分,建议重新拍摄")
                 has_error = True
                 continue
             elif warnings:
-                quality_issues.append(f"#{file.name}：{'；'.join(warnings)}")
-            
+                quality_issues.append(f"#{file.name}:{';'.join(warnings)}")
+
             valid_files.append(file)
-        
+
         if quality_issues:
-            st.warning("**图片质量提醒：**\n" + "\n".join(f"- {issue}" for issue in quality_issues))
-        
+            st.warning("**图片质量提醒:**\n" + "\n".join(f"- {issue}" for issue in quality_issues))
+
         if has_error and not valid_files:
             uploaded_files = None
         elif has_error and valid_files:
-            st.warning(f"部分图片被过滤，剩余 {len(valid_files)} 张有效图片")
+            st.warning(f"部分图片被过滤,剩余 {len(valid_files)} 张有效图片")
             uploaded_files = valid_files
         else:
             uploaded_files = valid_files
-        
+
         if uploaded_files:
             st.success(f"已通过质量检测 {len(uploaded_files)} 张照片")
             cols = st.columns(min(3, len(uploaded_files)))
@@ -1004,22 +1117,22 @@ with col1:
                             caption += f"\\n⚠️ {warnings[0]}"
                         st.image(file, caption=caption, use_column_width=True)
                         # 质量进度条
-                        st.progress(quality_score / 100, text=f"质量评分：{quality_score}")
+                        st.progress(quality_score / 100, text=f"质量评分:{quality_score}")
                     except Exception as img_error:
                         st.warning(f"[图片加载失败: {file.name}]")
-        
+
         # 删除按钮区域
         st.markdown("**管理已上传图片**")
-        
+
         if uploaded_files and len(uploaded_files) > 0:
             del_cols = st.columns(min(5, len(uploaded_files)))
             files_to_remove = []
-            
+
             for idx in range(len(uploaded_files)):
                 with del_cols[idx % 5]:
                     if st.button(f"删除 #{idx+1}", key=f"del_{idx}"):
                         files_to_remove.append(idx)
-            
+
             if files_to_remove:
                 uploaded_files = [f for i, f in enumerate(uploaded_files) if i not in files_to_remove]
                 st.rerun()
@@ -1028,16 +1141,16 @@ with col2:
     st.subheader("2. 填写基本信息")
     product_name = st.text_input(
         "产品名称",
-        placeholder="例如：不锈钢保温杯",
+        placeholder="例如:不锈钢保温杯",
         help="请输入产品的通用名称",
         disabled=is_limit_reached()
     )
-    
-    # AQL 三层抽样方案（方案 B）
-    st.markdown("**AQL 三层抽样标准（方案 B - 通用标准）**")
-    
+
+    # AQL 三层抽样方案(方案 B)
+    st.markdown("**AQL 三层抽样标准(方案 B - 通用标准)**")
+
     col_aql1, col_aql2, col_aql3 = st.columns(3)
-    
+
     with col_aql1:
         aql_critical = st.selectbox(
             "致命缺陷 (Critical)",
@@ -1046,7 +1159,7 @@ with col2:
             help="安全风险、违法 - 最严格",
             disabled=is_limit_reached()
         )
-    
+
     with col_aql2:
         aql_major = st.selectbox(
             "主要缺陷 (Major)",
@@ -1055,7 +1168,7 @@ with col2:
             help="功能失效、影响使用 - 通用标准",
             disabled=is_limit_reached()
         )
-    
+
     with col_aql3:
         aql_minor = st.selectbox(
             "次要缺陷 (Minor)",
@@ -1064,10 +1177,10 @@ with col2:
             help="外观瑕疵、不影响功能 - 宽松",
             disabled=is_limit_reached()
         )
-    
+
     # 组合成 inspection_standard 字符串传递给 AI
     inspection_standard = f"致命:{aql_critical} / 主要:{aql_major} / 次要:{aql_minor}"
-    
+
     order_quantity = st.number_input(
         "订单数量",
         min_value=1,
@@ -1076,34 +1189,34 @@ with col2:
         help="用于计算抽样数量和 AQL Ac/Re",
         disabled=is_limit_reached()
     )
-    
-    # 使用 AQL 标准表计算样本量和 Ac/Re
-    # 以主要缺陷的 AQL 值为基准（最常用）
-    sample_size, sample_code, ac, rej = get_aql_sample_info(order_quantity, aql_major)
-    
-    st.info(f"""**AQL 抽样方案（主要缺陷 {aql_major}）**
-- 样本量代码：{sample_code}
-- 抽样数量：**{sample_size}** 件
-- 接收数(Ac)：{ac}
-- 拒收数(Re)：{rej}
 
-判定规则：缺陷数 ≤ {ac} → 接收；缺陷数 ≥ {rej} → 拒收""")
+    # 使用 AQL 标准表计算样本量和 Ac/Re
+    # 以主要缺陷的 AQL 值为基准(最常用)
+    sample_size, sample_code, ac, rej = get_aql_sample_info(order_quantity, aql_major)
+
+    st.info(f"""**AQL 抽样方案(主要缺陷 {aql_major})**
+- 样本量代码:{sample_code}
+- 抽样数量:**{sample_size}** 件
+- 接收数(Ac):{ac}
+- 拒收数(Re):{rej}
+
+判定规则:缺陷数 ≤ {ac} → 接收;缺陷数 ≥ {rej} → 拒收""")
 
 # 生成报告按钮
 st.markdown("---")
 
 if is_limit_reached():
-    st.error(f"已达到使用次数限制（{get_inspection_limit()}次）")
+    st.error(f"已达到使用次数限制({get_inspection_limit()}次)")
     st.info("试用次数已用完。注册登录解锁更多免费次数")
 else:
     remaining = get_remaining()
-    st.info(f"您还有 **{remaining}** 次免费使用次数（永久）")
+    st.info(f"您还有 **{remaining}** 次免费使用次数(永久)")
 
 col_btn1, col_btn2, col_btn3 = st.columns([1, 2, 1])
 with col_btn2:
     # 按钮禁用条件
     button_disabled = is_limit_reached() or not (uploaded_files and product_name and product_name.strip())
-    
+
     if st.button(
         "生成验货报告",
         use_container_width=True,
@@ -1123,20 +1236,23 @@ with col_btn2:
             else:
                 st.session_state["inspection_count"] += 1
                 save_usage_count(st.session_state["inspection_count"])
-                # 同步 IP 计数到 Supabase（防换浏览器）
+                # 同步 IP 计数到 Supabase(防换浏览器)
                 if supabase_ready:
                     client_ip = get_client_ip()
                     increment_ip_usage(client_ip)
                     st.session_state["ip_usage_count"] = get_ip_usage(client_ip)
             if user and supabase_ready:
                 update_inspection_count(user["id"], user["inspection_count"])
-            
+
+            # 计算三层真实 Ac/Re（基于订单数量 + 每层 AQL）
+            acre = compute_three_layer_acre(order_quantity, aql_critical, aql_major, aql_minor)
             # 调用AI分析
             with st.spinner(f"AI正在分析图片（最多等待{API_TIMEOUT_SECONDS}秒）..."):
                 success, result = analyze_product_images(
                     uploaded_files, 
                     product_name.strip(), 
-                    inspection_standard
+                    inspection_standard,
+                    acre=acre
                 )         
             if not success:
                 # 分析失败 - 回退次数
@@ -1150,14 +1266,14 @@ with col_btn2:
                         client_ip = get_client_ip()
                         decrement_ip_usage(client_ip)
                         st.session_state["ip_usage_count"] = get_ip_usage(client_ip)
-                
+
                 if user and supabase_ready:
                     update_inspection_count(user["id"], user["inspection_count"])
-                
+
                 st.session_state["analysis_error"] = result
                 st.session_state["analysis_result"] = None
                 st.rerun()
-            
+
             # 分析成功
             st.session_state["analysis_result"] = result
             st.session_state["analysis_error"] = None
@@ -1165,18 +1281,18 @@ with col_btn2:
 # ===== 显示分析错误 =====
 if st.session_state.get("analysis_error"):
     st.markdown("---")
-    st.error(f"AI 分析失败：{st.session_state['analysis_error']}")
+    st.error(f"AI 分析失败:{st.session_state['analysis_error']}")
     col_retry1, col_retry2, col_retry3 = st.columns([1, 1, 1])
     with col_retry2:
         if st.button("重试", type="primary", use_container_width=True):
             st.session_state["analysis_error"] = None
             st.rerun()
-    st.info("请检查：\n1. 图片是否清晰\n2. 网络是否正常\n3. 如持续失败，请联系管理员")
+    st.info("请检查:\n1. 图片是否清晰\n2. 网络是否正常\n3. 如持续失败,请联系管理员")
 
 # ===== 显示报告 =====
 if st.session_state.get("analysis_result"):
     ai_result = st.session_state["analysis_result"]
-    
+
     # 生成报告数据
     report_data = {
         "report_id": f"RPT-{datetime.now().strftime('%Y%m%d-%H%M%S')}",
@@ -1192,44 +1308,44 @@ if st.session_state.get("analysis_result"):
         "confidence": ai_result.get("confidence", 0.5),
         "savings": 350
     }
-    
+
     # 保存到本地历史
     st.session_state["inspection_history"].append(report_data)
     st.session_state["total_savings"] += report_data["savings"]
-    
-    # 内存优化：限制历史记录最多 5 条，防止 OOM
+
+    # 内存优化:限制历史记录最多 5 条,防止 OOM
     if len(st.session_state["inspection_history"]) > 5:
         st.session_state["inspection_history"] = st.session_state["inspection_history"][-5:]
         st.session_state["total_savings"] = sum(r.get("savings", 0) for r in st.session_state["inspection_history"])
-    
-    # 内存优化：清理原始 AI 响应（可能很大）
+
+    # 内存优化:清理原始 AI 响应(可能很大)
     st.session_state["last_raw_ai_response"] = None
-    
+
     # 保存到数据库
     user = st.session_state.get("user")
     if user and supabase_ready:
-        save_report(user["id"], report_data)   
-    st.success("报告生成完成！")    
+        save_report(user["id"], report_data)
+    st.success("报告生成完成!")
     # ===== 显示报告 =====
     st.markdown("---")
     # 报告头部 - 专业化格式
     report_header_cols = st.columns([2, 1])
     with report_header_cols[0]:
         st.header("验货报告")
-        st.caption(f"报告编号：{report_data['report_id']}")
+        st.caption(f"报告编号:{report_data['report_id']}")
     with report_header_cols[1]:
         st.markdown(f"""
-        **委托方：** {(st.session_state.get('user') or {}).get('email', '免费体验用户')} 
-        
-        **检验标准：** {report_data.get('inspection_standard', 'AQL 2.5')}        
-        
-        **订单数量：** {report_data.get('order_quantity', 500)} 件        
-        
-        **抽样数量：** {report_data['sample_size']} 件
+        **委托方:** {(st.session_state.get('user') or {}).get('email', '免费体验用户')}
+
+        **检验标准:** {report_data.get('inspection_standard', 'AQL 2.5')}
+
+        **订单数量:** {report_data.get('order_quantity', 500)} 件
+
+        **抽样数量:** {report_data['sample_size']} 件
         """)
-        
+
     st.divider()
-    st.header("验货报告") 
+    st.header("验货报告")
     st.subheader("1. 验货结论")
     col_con1, col_con2, col_con3 = st.columns(3)
     with col_con1:
@@ -1237,7 +1353,7 @@ if st.session_state.get("analysis_result"):
     with col_con2:
         st.metric("验货日期", report_data["inspection_date"])
     with col_con3:
-        st.metric("抽样数量", f"{report_data['sample_size']} 件")    
+        st.metric("抽样数量", f"{report_data['sample_size']} 件")
     # 结论颜色标识
     conclusion = report_data['conclusion']
     if "合格" in conclusion and "有条件" not in conclusion:
@@ -1246,16 +1362,16 @@ if st.session_state.get("analysis_result"):
         st.error(f"### {conclusion}")
     else:
         st.warning(f"### {conclusion}")
-    
+
     # 三层 AQL 结果显示
     if "three_layer_result" in report_data:
         st.markdown("--- ")
         st.subheader("2. 三层 AQL 抽样结果")
-        
+
         three_layer = report_data["three_layer_result"]
-        
+
         col_layer1, col_layer2, col_layer3 = st.columns(3)
-        
+
         with col_layer1:
             st.markdown("**致命缺陷 (Critical)**")
             st.caption(f"AQL {three_layer['critical']['aql']}")
@@ -1264,17 +1380,17 @@ if st.session_state.get("analysis_result"):
             else:
                 st.error("✗ 不通过")
             st.metric("缺陷数", three_layer['critical']['defect_count'])
-        
+
         with col_layer2:
             st.markdown("**主要缺陷 (Major)**")
             st.caption(f"AQL {three_layer['major']['aql']}")
             if three_layer['major']['passed']:
                 st.success("✓ 通过")
             else:
-            
+
                 st.error("✗ 不通过")
             st.metric("缺陷数", three_layer['major']['defect_count'])
-        
+
         with col_layer3:
             st.markdown("**次要缺陷 (Minor)**")
             st.caption(f"AQL {three_layer['minor']['aql']}")
@@ -1283,17 +1399,17 @@ if st.session_state.get("analysis_result"):
             else:
                 st.error("✗ 不通过")
             st.metric("缺陷数", three_layer['minor']['defect_count'])
-    
-    st.info(f"**建议：** {report_data['recommendation']}")    
+
+    st.info(f"**建议:** {report_data['recommendation']}")
     # 置信度
     confidence = report_data.get('confidence', 0.5)
     if confidence >= 0.8:
-        st.caption(f"置信度：{confidence:.0%}（高）")
+        st.caption(f"置信度:{confidence:.0%}(高)")
     elif confidence >= 0.5:
-        st.caption(f"置信度：{confidence:.0%}（中）")
+        st.caption(f"置信度:{confidence:.0%}(中)")
     else:
-        st.caption(f"置信度：{confidence:.0%}（低）")
-    
+        st.caption(f"置信度:{confidence:.0%}(低)")
+
     st.markdown("---")
     st.subheader("2. 缺陷清单")
     if report_data["defects"]:
@@ -1316,18 +1432,18 @@ if st.session_state.get("analysis_result"):
                     st.error(severity)
     else:
         st.info("未发现明显缺陷")
-    
+
     st.markdown("---")
-    
+
     # 缺陷统计摘要
     if report_data["defects"]:
         defects = report_data["defects"]
-        # 统一使用 AQL 三层命名：致命/主要/次要
+        # 统一使用 AQL 三层命名:致命/主要/次要
         severity_counts = {"致命": 0, "主要": 0, "次要": 0}
         for d in defects:
             sev = d.get("severity", "次要")
             severity_counts[sev] = severity_counts.get(sev, 0) + 1
-        
+
         stat_cols = st.columns(3)
         with stat_cols[0]:
             st.metric("致命缺陷", severity_counts.get("致命", 0))
@@ -1335,12 +1451,12 @@ if st.session_state.get("analysis_result"):
             st.metric("主要缺陷", severity_counts.get("主要", 0))
         with stat_cols[2]:
             st.metric("次要缺陷", severity_counts.get("次要", 0))
-        
+
         # 通过率计算
         if report_data.get("sample_size", 0) > 0:
             total_defects = sum(d.get("quantity", 1) for d in defects)
             pass_rate = max(0, (report_data["sample_size"] - total_defects) / report_data["sample_size"] * 100)
-            st.progress(pass_rate / 100, text=f"估算通过率：{pass_rate:.1f}%")
+            st.progress(pass_rate / 100, text=f"估算通过率:{pass_rate:.1f}%")
 
     st.subheader("3. 照片附件")
     if uploaded_files:
@@ -1351,71 +1467,71 @@ if st.session_state.get("analysis_result"):
                     st.image(file, caption=file.name, use_column_width=True)
                 except Exception:
                     st.warning(f"[图片加载失败: {file.name}]")
-    
+
     # PDF导出
     st.markdown("---")
     st.subheader("导出报告")
     font_available = check_font_available()
-    
+
     # 检查用户权限和导出次数
     user = st.session_state.get("user")
     can_export = False
     export_msg = ""
-    
+
     if not user:
-        # 未注册用户：不能导出
+        # 未注册用户:不能导出
         can_export = False
         export_msg = "⚠️ 未注册用户不能导出 PDF。请注册后使用导出功能。"
     else:
-        # 注册用户：检查导出次数
+        # 注册用户:检查导出次数
         export_count = user.get("export_count", 0)
         if export_count >= 5:
             can_export = False
-            export_msg = "⚠️ 导出次数已用完（最多5次）。请联系管理员。"
+            export_msg = "⚠️ 导出次数已用完(最多5次)。请联系管理员。"
         else:
             can_export = True
             export_msg = f""
-    
+
     col_pdf1, col_pdf2 = st.columns(2)
     with col_pdf1:
-        if st.button("预览报告（HTML）", use_container_width=True):
-            st.success("报告已生成！")
-            st.info("使用浏览器打印功能保存为PDF：Ctrl+P 或 Cmd+P")
-    
+        if st.button("预览报告(HTML)", use_container_width=True):
+            st.success("报告已生成!")
+            st.info("使用浏览器打印功能保存为PDF:Ctrl+P 或 Cmd+P")
+
     with col_pdf2:
         if not can_export:
-            # 不能导出：显示提示
+            # 不能导出:显示提示
             st.warning(export_msg)
             if not user:
                 if st.button("前往注册", use_container_width=True):
                     st.session_state["show_auth"] = True
                     st.rerun()
         else:
-            # 可以导出：显示下载按钮
+            # 可以导出:显示下载按钮
             try:
-                # 检查当前报告是否已导出过（防止重复计数）
+                # 检查当前报告是否已导出过(防止重复计数)
                 report_id = report_data.get("report_id", "")
                 exported_reports = st.session_state.get("exported_reports", set())
-                
+
                 if report_id not in exported_reports:
-                    # 首次导出此报告：增加导出计数
+                    # 首次导出此报告:增加导出计数
                     user["export_count"] = user.get("export_count", 0) + 1
                     exported_reports.add(report_id)
                     st.session_state["exported_reports"] = exported_reports
-                    
-                    # 更新数据库（如果已配置）
+
+                    # 更新数据库(如果已配置)
                     if supabase_ready:
                         try:
                             from auth_helper import update_export_count
                             update_export_count(user["id"], user["export_count"])
                         except Exception as e:
                             print(f"更新导出计数失败: {e}")
-                
+
                 pdf_buffer = generate_inspection_pdf(report_data, uploaded_files)
                 conclusion_tag = "合格" if "合格" in report_data['conclusion'] else "不合格"
                 pdf_filename = f"验货报告_{conclusion_tag}_{report_data['product_name']}_{report_data['report_id'][:8]}.pdf"
                 st.download_button(
-                    label=f"下载PDF报告（剩余 {5 - user['export_count']} 次）",
+                    label=f"下载PDF报告(剩余 {5 - user['export_count']} 次)",
                     data=pdf_buffer,
                     file_name=pdf_filename,
                     mime="application/pdf",
@@ -1423,26 +1539,26 @@ if st.session_state.get("analysis_result"):
                     key="download_pdf"
                 )
                 if not font_available:
-                    st.warning("未检测到中文字体，PDF可能显示为英文。请联系管理员添加字体文件。")
+                    st.warning("未检测到中文字体,PDF可能显示为英文。请联系管理员添加字体文件。")
             except Exception as e:
-                st.error(f"PDF生成失败：{str(e)}")
-                st.info("临时方案：使用浏览器打印功能（Ctrl+P）保存为PDF")
-    
-    # 显示导出次数（仅注册用户）
+                st.error(f"PDF生成失败:{str(e)}")
+                st.info("临时方案:使用浏览器打印功能(Ctrl+P)保存为PDF")
+
+    # 显示导出次数(仅注册用户)
     if user:
-        st.caption(f"导出次数：{user.get('export_count', 0)} / 5")
-    
+        st.caption(f"导出次数:{user.get('export_count', 0)} / 5")
+
     # ROI展示
     st.markdown("---")
     st.subheader("本次验货价值")
     col_roi1, col_roi2, col_roi3 = st.columns(3)
     with col_roi1:
-        st.metric("AI验货成本", "￥0（MVP免费）")
+        st.metric("AI验货成本", "¥0(MVP免费)")
     with col_roi2:
-        st.metric("节省人工成本", f"￥{report_data['savings']}")
+        st.metric("节省人工成本", f"¥{report_data['savings']}")
     with col_roi3:
-        st.metric("净节省", f"￥{report_data['savings']}")
-    
+        st.metric("净节省", f"¥{report_data['savings']}")
+
     # 新建报告按钮
     st.markdown("---")
     col_new1, col_new2, col_new3 = st.columns([1, 1, 1])
@@ -1461,11 +1577,11 @@ if st.session_state["inspection_history"]:
     with st.sidebar:
         st.markdown("---")
         st.subheader("验货历史")
-        
+
         # 历史总数
         total = len(st.session_state["inspection_history"])
         st.caption(f"共 {total} 条记录")
-        
+
         for idx, record in enumerate(reversed(st.session_state["inspection_history"])):
             with st.expander(f"#{total-idx} {record['product_name']} - {record['inspection_date'][:10]}", expanded=False):
                 col_h1, col_h2 = st.columns(2)
@@ -1480,9 +1596,9 @@ if st.session_state["inspection_history"]:
                 with col_h2:
                     defect_count = len(record.get("defects", []))
                     st.metric("缺陷数", f"{defect_count}")
-                
-                st.write(f"**建议：** {record.get('recommendation', '暂无')}")
-                
+
+                st.write(f"**建议:** {record.get('recommendation', '暂无')}")
+
                 # 删除按钮
                 if st.button("删除此记录", key=f"del_history_{idx}"):
                     st.session_state["inspection_history"].pop(total - 1 - idx)
