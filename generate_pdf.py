@@ -1,14 +1,6 @@
 """
 PDF 生成模块 - 外贸验货报告
 支持中文、图片嵌入、水印
-
-=== 2026-07-11 修复说明 ===
-1. 【中文字体】原代码查找 "fonts/simhei.ttf"（全小写），但仓库实际文件为
-   "fonts/SimHei.ttf"（大写 S/H）。Linux（Streamlit Cloud）区分大小写，
-   导致字体加载失败、中文显示为 ■。已补全大小写正确的路径。
-2. 【AQL 表格】原代码把 three_layer_result["critical"] 当作字符串 str(dict)
-   直接塞进表格，导致 PDF 中出现 {'passed': False, ...} 原始字典。
-   已改为正确提取 passed / aql / defect_count 字段。
 """
 
 from reportlab.lib.pagesizes import A4
@@ -67,27 +59,15 @@ SYSTEM_FONT_PATHS = [
 # 合并所有字体路径（项目目录优先）
 ALL_FONT_PATHS = PROJECT_FONT_PATHS + SYSTEM_FONT_PATHS
 
-# 诊断：打印所有字体路径的存在情况（Streamlit Cloud 日志可见）
-print(f"[PDF字体诊断] Python={platform.python_version()}, Platform={platform.system()}")
-print(f"[PDF字体诊断] 当前工作目录: {os.getcwd()}")
-for p in ALL_FONT_PATHS:
-    exists = os.path.exists(p)
-    print(f"[PDF字体诊断]   {'FOUND' if exists else 'MISSING'}: {p}")
-
 for path in ALL_FONT_PATHS:
     if os.path.exists(path):
         try:
             pdfmetrics.registerFont(TTFont(FONT_NAME, path))
             FONT_AVAILABLE = True
             FONT_SOURCE = path
-            print(f"✅ 成功加载中文字体: {path}")
             break
-        except Exception as e:
-            print(f"⚠️ 字体加载失败 {path}: {e}")
+        except Exception:
             continue
-
-if not FONT_AVAILABLE:
-    print("❌ 未找到任何中文字体，PDF 中文将显示为空白方块（■）")
 
 
 def check_font_available():
@@ -214,9 +194,7 @@ def generate_inspection_pdf(report_data, uploaded_files):
     """
     # 诊断信息（Streamlit Cloud 日志可见）
     import platform, sys as _sys
-    print(f"[PDF] 开始生成 | FONT_AVAILABLE={FONT_AVAILABLE} | FONT_SOURCE={FONT_SOURCE}")
-    print(f"[PDF] 工作目录={os.getcwd()} | 平台={platform.system()} | Python={platform.python_version()}")
-    print(f"[PDF] 报告ID={report_data.get('report_id','N/A')} | 产品={report_data.get('product_name','N/A')}")
+    print(f"[PDF] 开始生成报告 | 产品={report_data.get('product_name','N/A')}")
 
     buffer = BytesIO()
 
@@ -440,7 +418,6 @@ def generate_inspection_pdf(report_data, uploaded_files):
         story.append(Paragraph("无照片附件", normal_style))
 
     # 生成 PDF（带水印）
-    print(f"[PDF] 开始构建，story 元素数={len(story)}")
     try:
         doc.build(
             story,
@@ -448,13 +425,9 @@ def generate_inspection_pdf(report_data, uploaded_files):
             onLaterPages=add_watermark
         )
         buffer.seek(0)
-        pdf_data = buffer.read()
-        print(f"[PDF] 生成成功，大小={len(pdf_data)} bytes，header={pdf_data[:8]!r}")
-        buffer.seek(0)
         return buffer
     except Exception as e:
         import traceback
-        print(f"[PDF] 构建失败: {e}")
         traceback.print_exc()
         # 返回一个含错误信息的最小 PDF
         from reportlab.platypus import SimpleDocTemplate as SDT2, Paragraph as P2, Spacer as Sp2
@@ -467,7 +440,7 @@ def generate_inspection_pdf(report_data, uploaded_files):
             Sp2(1, 0.3*cm),
             P2(f'错误: {str(e)}', err_style),
             Sp2(1, 0.3*cm),
-            P2(f'字体: {FONT_AVAILABLE} / {FONT_SOURCE}', err_style),
+            P2(f'字体: {FONT_AVAILABLE}', err_style),
             P2(f'工作目录: {os.getcwd()}', err_style),
         ]
         err_doc.build(err_story)
