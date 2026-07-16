@@ -33,7 +33,12 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# ===== 共享内核 core=====
+# ===== 共享内核 core（支持子目录部署）=====
+import sys
+from pathlib import Path
+# 将父目录加入路径，使 core/ 可被导入
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 from core.aql import judge_three_layer, compute_three_layer_acre, format_acre_hint
 from core.pdf import generate_inspection_pdf, check_font_available, get_font_warning_message
 from core.ai import build_ai_client
