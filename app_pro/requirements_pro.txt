@@ -1,0 +1,16 @@
+# requirements_pro.txt - app_pro 额外依赖
+# 基础依赖与根目录 requirements.txt 保持一致
+# 此文件仅列出 app_pro 额外需要的依赖（或版本覆盖）
+# 安装方式：pip install -r requirements_pro.txt
+
+# Streamlit（约定了页面配置，固定版本）
+streamlit>=1.40.0
+
+# Supabase Python SDK（工具层查历史）
+supabase>=2.0.0
+
+# HTTP 客户端（已在 requirements.txt 中）
+httpx>=0.25.0
+
+# OpenAI SDK（已在 requirements.txt 中）
+openai>=1.3.0
