@@ -171,6 +171,38 @@ def run_agent(
         ("ask", question_str)    -- AI 需要追问
         ("error", error_str)     -- 运行异常
     """
+    # ===== 新增：图片预分析（关键修复）=====
+    # 原因：Agent 主循环使用的是 qwen-max 文本模型，无法直接看图。
+    # 需要先用 qwen-vl-plus 做视觉分析，把缺陷数据注入上下文。
+    if context.image_bytes_list:
+        ok, conclusion_or_error, defects, image_labels = analyze_images_vision(
+            config, context
+        )
+        if ok:
+            # 把视觉分析结果注入消息和上下文
+            vision_msg = (
+                "[图片分析结果]\n"
+                f"- 初步结论：{conclusion_or_error}\n"
+                f"- 发现缺陷：{len(defects)} 项\n"
+            )
+            for i, d in enumerate(defects[:10], 1):
+                vision_msg += (
+                    f"  {i}. {d.get('image', image_labels[min(i-1, len(image_labels)-1)] if image_labels else '图')}"
+                    f" {d.get('type', '未知')} × {d.get('quantity', 0)}件"
+                    f"（{d.get('severity', '次要')}）{d.get('description', '')}\n"
+                )
+            # 追加一条 user 消息告知 Agent 视觉分析已完成
+            messages.append({
+                "role": "user",
+                "content": vision_msg + "\n请基于以上图片分析结果，调用工具查询必要的标准/历史/档案后，给出最终结论。"
+            })
+        else:
+            # 视觉分析失败也要继续（保留旧逻辑）
+            messages.append({
+                "role": "user",
+                "content": f"[图片分析失败] {conclusion_or_error}\n请基于已知信息推理。"
+            })
+
     # 构建 system prompt（含先验知识）
     system_content = context.build_prior_context() + config.system_prompt
     if messages and messages[0].get("role") == "system":

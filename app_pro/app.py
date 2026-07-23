@@ -649,6 +649,13 @@ def main():
 
         if user_input:
             handle_user_input(user_input)
+        elif (
+            st.session_state.image_bytes_list
+            and not st.session_state.agent_finished
+            and not st.session_state.agent_messages
+        ):
+            # 自动触发：只上传了图片但没输入文本 → Agent 自动开始分析
+            handle_user_input("请分析我刚上传的图片，给出验货结论。")
 
         # 如果没有对话历史，给出引导
         if not st.session_state.agent_messages:
