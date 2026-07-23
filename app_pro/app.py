@@ -323,6 +323,46 @@ def handle_user_input(user_input: str):
 
     # 运行 Agent
     with st.chat_message("assistant"):
+        # === 先进行视觉分析（可见状态）===
+        vision_done = False
+        if st.session_state.image_bytes_list:
+            ctx.image_bytes_list = st.session_state.image_bytes_list
+            with st.status("🔍 正在分析图片（qwen-vl-plus）...", expanded=True) as vstatus:
+                from app_pro.agent_loop import analyze_images_vision
+                vok, vresult, vdefects, vlabels = analyze_images_vision(config, ctx)
+                if vok:
+                    vstatus.update(
+                        label=f"✅ 图片分析完成：{vresult}（发现 {len(vdefects)} 项缺陷）",
+                        state="complete",
+                    )
+                    vision_done = True
+                    # 把视觉分析结果插入 messages
+                    vision_summary = (
+                        f"[视觉分析已完成]\n"
+                        f"初步结论：{vresult}\n"
+                        f"缺陷数量：{len(vdefects)} 项\n"
+                    )
+                    for i, d in enumerate(vdefects[:10], 1):
+                        vision_summary += (
+                            f"  {i}. {d.get('type', '未知')} × {d.get('quantity', 0)}件"
+                            f"（{d.get('severity', '次要')}）{d.get('description', '')}\n"
+                        )
+                    vision_summary += "\n以上是 qwen-vl-plus 识别结果，请不要再问'请分享图片'。\n"
+                    messages.append({"role": "user", "content": vision_summary})
+
+                    # 在 UI 上直接展示缺陷清单
+                    if vdefects:
+                        st.markdown("**🔍 视觉识别到的缺陷：**")
+                        for d in vdefects[:10]:
+                            sev_icon = {"致命": "🔴", "主要": "🟡", "次要": "🟢"}.get(d.get("severity", "次要"), "⚪")
+                            st.markdown(
+                                f"- {sev_icon} **{d.get('type', '未知')}** × {d.get('quantity', 0)}件"
+                                f" — {d.get('description', '')}"
+                            )
+                else:
+                    vstatus.update(label=f"❌ 图片分析失败：{vresult}", state="error")
+                    st.error(f"视觉分析错误：{vresult}")
+
         with st.spinner("Agent 推理中..."):
             status, result = run_agent(
                 messages=messages,
