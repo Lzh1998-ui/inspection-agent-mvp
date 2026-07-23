@@ -141,6 +141,7 @@ def init_session_state():
         "agent_finished": False,
         "final_report": None,
         "analysis_triggered": False,  # 防重复自动触发锁
+        "trigger_signature": None,    # 上一次触发时的图片签名（去重 key）
         "mode": "intelligent",  # "intelligent" | "fast"
     }
     for key, val in defaults.items():
@@ -716,9 +717,13 @@ def render_upload():
 
     if uploaded:
         new_bytes_list = [f.getvalue() for f in uploaded]
-        # 检测图片是否变化（新增/替换）→ 重置触发锁，允许重新自动分析
-        if new_bytes_list != st.session_state.image_bytes_list:
+        # 用 (文件名, 长度) 作为图片集合签名，只在真正的图片集合变化时才解锁。
+        # 这避免了逐张上传时每次 file_uploader 重新执行都把触发锁重置为 False，
+        # 进而重复自动触发 "请分析我刚上传的图片…"。
+        new_signature = tuple((f.name, len(b)) for f, b in zip(uploaded, new_bytes_list))
+        if new_signature != st.session_state.trigger_signature:
             st.session_state.analysis_triggered = False
+            st.session_state.trigger_signature = new_signature
         st.session_state.uploaded_files = uploaded
         st.session_state.image_bytes_list = new_bytes_list
 
@@ -734,9 +739,10 @@ def render_upload():
             st.session_state.agent_finished = False
             st.session_state.final_report = None
     else:
-        # 清空图片也重置触发锁
+        # 清空图片也重置触发锁和签名
         if st.session_state.image_bytes_list:
             st.session_state.analysis_triggered = False
+            st.session_state.trigger_signature = None
         st.session_state.image_bytes_list = []
 
 
@@ -786,8 +792,13 @@ def main():
             user_input = st.chat_input("输入消息，或描述问题/补充信息...")
         with col_reset:
             if st.button("🔄 重置", use_container_width=True):
-                for k in ["agent_messages", "tool_calls", "agent_context", "agent_finished", "final_report", "analysis_triggered"]:
-                    st.session_state[k] = [] if k in ("agent_messages", "tool_calls") else None if k in ("agent_context", "final_report") else False
+                for k in ["agent_messages", "tool_calls"]:
+                    st.session_state[k] = []
+                for k in ["agent_context", "final_report"]:
+                    st.session_state[k] = None
+                st.session_state.agent_finished = False
+                st.session_state.analysis_triggered = False
+                st.session_state.trigger_signature = None
                 st.rerun()
 
         if user_input:
@@ -816,8 +827,13 @@ def main():
             manual_start = st.button("🚀 开始分析", type="primary", use_container_width=True)
         with col_reset:
             if st.button("🔄 重置", use_container_width=True, key="fast_reset"):
-                for k in ["agent_messages", "tool_calls", "agent_context", "agent_finished", "final_report", "analysis_triggered"]:
-                    st.session_state[k] = [] if k in ("agent_messages", "tool_calls") else None if k in ("agent_context", "final_report") else False
+                for k in ["agent_messages", "tool_calls"]:
+                    st.session_state[k] = []
+                for k in ["agent_context", "final_report"]:
+                    st.session_state[k] = None
+                st.session_state.agent_finished = False
+                st.session_state.analysis_triggered = False
+                st.session_state.trigger_signature = None
                 st.rerun()
 
         if manual_start:
