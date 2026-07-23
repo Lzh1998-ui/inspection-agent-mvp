@@ -194,13 +194,13 @@ def render_sidebar():
         st.markdown("**⚙️ 运行模式**")
         mode = st.segmented_control(
             "",
-            {"🤖 智能模式": "intelligent", "⚡ 极速模式": "fast"},
-            default="intelligent" if st.session_state.mode == "intelligent" else "fast",
+            options=["🤖 智能模式", "⚡ 极速模式"],
+            default="🤖 智能模式" if st.session_state.mode == "intelligent" else "⚡ 极速模式",
             help=None,
         )
         if mode is None:
-            mode = st.session_state.mode
-        st.session_state.mode = mode
+            mode = "🤖 智能模式" if st.session_state.mode == "intelligent" else "⚡ 极速模式"
+        st.session_state.mode = "intelligent" if "智能" in mode else "fast"
 
         # 模式说明
         if st.session_state.mode == "intelligent":
