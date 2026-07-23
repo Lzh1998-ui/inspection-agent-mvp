@@ -743,6 +743,11 @@ def main():
 
     st.divider()
 
+    # 顶层持久渲染：若已有最终结果，始终显示（避免 rerun 后丢失）
+    if st.session_state.final_report:
+        _render_final_report(st.session_state.final_report)
+        st.divider()
+
     # 根据模式渲染不同 UI
     if st.session_state.mode == "intelligent":
         # ===== 智能模式 =====
@@ -771,17 +776,35 @@ def main():
         # 如果没有对话历史，给出引导
         if not st.session_state.agent_messages:
             st.info(
-                "👋 填写左侧参数并上传图片后，在下方输入任意消息开始验货。"
-                "Agent 会根据产品信息主动查档案、历史和标准。"
+                "👋 填写左侧参数并上传图片后，Agent 会自动开始分析；"
+                "也可在下方输入框补充说明或提问。"
             )
 
     else:
-        # ===== 快速模式 =====
-        st.markdown("### ⚡ 快速模式")
-        st.caption("单轮 AI 分析，无需等待 Agent 追问，适合信息齐全时快速出报告")
+        # ===== 极速模式 =====
+        st.markdown("### ⚡ 极速模式")
+        st.caption("单次视觉识别（多轮投票）+ AQL 确定性判定，约 15~45 秒出报告")
 
-        if st.button("🚀 开始分析", type="primary", use_container_width=True):
-            run_fast_mode()
+        col_start, col_reset = st.columns([4, 1])
+        with col_start:
+            manual_start = st.button("🚀 开始分析", type="primary", use_container_width=True)
+        with col_reset:
+            if st.button("🔄 重置", use_container_width=True, key="fast_reset"):
+                for k in ["agent_messages", "tool_calls", "agent_context", "agent_finished", "final_report"]:
+                    st.session_state[k] = [] if k in ("agent_messages", "tool_calls") else None if k in ("agent_context", "final_report") else False
+                st.rerun()
+
+        if manual_start:
+            handle_user_input("请分析我上传的图片，给出验货结论。")
+        elif (
+            st.session_state.image_bytes_list
+            and not st.session_state.agent_finished
+            and not st.session_state.agent_messages
+        ):
+            # 自动触发：上传图片后自动开始极速分析
+            handle_user_input("请分析我上传的图片，给出验货结论。")
+        elif not st.session_state.final_report:
+            st.info("👋 填写左侧参数并上传图片后，将自动开始极速分析（或点击“开始分析”）。")
 
 
 if __name__ == "__main__":
