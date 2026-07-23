@@ -125,22 +125,36 @@ class AgentContext:
 
     def build_prior_context(self) -> str:
         parts = []
+        # 当前验货参数（用户侧边栏填写）
+        if self.product_name or self.order_quantity:
+            param_parts = []
+            if self.product_name:
+                param_parts.append(f"产品：{self.product_name}")
+            if self.factory_name:
+                param_parts.append(f"工厂：{self.factory_name}")
+            if self.order_quantity:
+                param_parts.append(f"订单数量：{self.order_quantity}件")
+            if self.inspection_standard:
+                param_parts.append(f"验货标准：{self.inspection_standard}")
+            param_parts.append(f"AQL标准：致命{self.aql_critical}/主要{self.aql_major}/次要{self.aql_minor}")
+            parts.append("[当前验货参数] " + "，".join(param_parts))
+        # 先验知识（数据库查询结果）
         if self.product_profile and not self.product_profile.get("error"):
             p = self.product_profile
             parts.append(
-                "[产品档案]"
+                "[产品档案] "
                 + f"{p.get('product_name', '')}（{p.get('factory_name', '')}）"
                 + f"历史验货 {p.get('inspection_count', 0)} 次，"
                 + f"通过率 {p.get('pass_rate', 0)}%，趋势：{p.get('quality_trend', '未知')}"
                 + (
-                    "。典型缺陷：" + ", ".join(p.get("typical_defects", [])[:3])
+                    "，典型缺陷：" + ", ".join(p.get("typical_defects", [])[:3])
                     if p.get("typical_defects")
                     else ""
                 )
             )
-        if self.defect_history and not self.defect_history[0].get("error"):
+        if self.defect_history and self.defect_history and not self.defect_history[0].get("error"):
             parts.append(
-                "[历史缺陷]"
+                "[历史缺陷] "
                 + "；".join(
                     f"第{i+1}次：{r.get('conclusion', '?')}，缺陷 {len(r.get('defects', []))} 项"
                     for i, r in enumerate(self.defect_history[:3])
