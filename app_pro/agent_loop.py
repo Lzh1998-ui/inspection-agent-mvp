@@ -120,6 +120,8 @@ class AgentContext:
     defect_history: list = field(default_factory=list)
     standard_info: dict | None = None
     image_bytes_list: list = field(default_factory=list)
+    # 标记：图片是否已被 analyze_images_vision 预处理过（避免 run_agent 重复调用 vl-plus）
+    images_preprocessed: bool = False
 
     def build_prior_context(self) -> str:
         parts = []
@@ -160,25 +162,111 @@ class AgentContext:
 # ============================================================================
 
 
+def _run_agent_fast(
+    config: AgentConfig,
+    context: AgentContext,
+) -> tuple[Literal["report"], dict, list[dict], list[str]] | tuple[Literal["error"], str, list, list]:
+    """
+    极速模式：单次视觉分析 + AQL 确定性规则，5~15 秒完成。
+
+    不调用 Agent 推理模型，直接：
+    1. qwen-vl-plus 识别缺陷
+    2. judge_three_layer() 确定性判定
+    3. 返回结构化报告
+    """
+    if not context.image_bytes_list:
+        return "error", "请先上传产品图片", [], []
+
+    # 调用视觉分析
+    ok, conclusion_or_error, defects, image_labels = analyze_images_vision(config, context)
+    if not ok:
+        return "error", f"图片分析失败：{conclusion_or_error}", [], []
+
+    # 基于真实 AQL 计算三层判定
+    if context.acre is None and context.order_quantity:
+        try:
+            context.acre = compute_three_layer_acre(
+                context.order_quantity,
+                context.aql_critical,
+                context.aql_major,
+                context.aql_minor,
+            )
+        except Exception:
+            pass
+
+    three_layer = {}
+    final_conclusion = conclusion_or_error
+    if context.acre:
+        three_layer, final_conclusion = judge_three_layer(defects, context.acre)
+
+    # 构建报告
+    report = {
+        "conclusion": final_conclusion,
+        "three_layer_result": three_layer,
+        "defects": [
+            {
+                "type": d.get("type", "未知"),
+                "quantity": int(d.get("quantity", 0)),
+                "severity": d.get("severity", "次要"),
+                "description": d.get("description", ""),
+                "image": d.get("image", image_labels[i] if i < len(image_labels) else f"图{i+1}"),
+            }
+            for i, d in enumerate(defects)
+        ],
+        "recommendation": _generate_recommendation(final_conclusion, defects),
+        "confidence": 0.85,
+        "mode": "fast",  # 标记来源
+    }
+
+    return "report", report, defects, image_labels
+
+
+def _generate_recommendation(conclusion: str, defects: list[dict]) -> str:
+    """根据结论和缺陷生成处理建议。"""
+    if "合格" in conclusion:
+        return "产品符合 AQL 标准，可以放行。建议保持现有生产工艺，定期抽检。"
+    if "拒收" in conclusion:
+        severe = [d for d in defects if d.get("severity") == "致命"]
+        if severe:
+            return f"存在 {len(severe)} 项致命缺陷，建议全部返工或与供应商协商退换货。"
+        return f"缺陷数量超过 AQL 接收标准，建议返工后重新验货。"
+    # 有条件接受
+    major = [d for d in defects if d.get("severity") == "主要"]
+    if major:
+        types = ", ".join(set(d.get("type", "") for d in major[:3]))
+        return f"存在主要缺陷（{types}），建议与供应商协商折扣或限期整改后复检。"
+    return "部分次要缺陷不影响使用，建议让步接受并记录追踪。"
+
+
 def run_agent(
     messages: list[dict],
     config: AgentConfig,
     context: AgentContext,
     tools_schema: list[dict],
     tool_registry: dict[str, callable],
-) -> tuple[Literal["report"], dict] | tuple[Literal["ask"], str] | tuple[Literal["error"], str]:
+    mode: Literal["intelligent", "fast"] = "intelligent",
+) -> tuple[Literal["report"], dict, list, list] | tuple[Literal["ask"], str] | tuple[Literal["error"], str]:
     """
     Agent 主循环。
 
+    mode="fast": 跳过 Agent 推理，直接用视觉分析结果 + 确定性 AQL 规则返回报告。
+                  单次 API 调用，5~15 秒完成。
+    mode="intelligent": 完整 Agent 多轮推理（默认），支持工具调用和追问。
+
     返回:
         ("report", result_dict)  -- 最终报告
-        ("ask", question_str)    -- AI 需要追问
+        ("ask", question_str)    -- AI 需要追问（仅 intelligent 模式）
         ("error", error_str)     -- 运行异常
     """
-    # ===== 图片预分析已在 app.py handle_user_input 中完成并注入到 messages =====
+    # ===== 极速模式：单次视觉分析 + AQL 确定性规则，无需 Agent 推理 =====
+    if mode == "fast":
+        return _run_agent_fast(config, context)
+
+    # ===== 深度模式（默认）：Agent 多轮推理 + 工具调用 =====
+    # 图片预分析已在 app.py handle_user_input 中完成并注入到 messages。
     # agent_loop.py 不再重复调用 qwen-vl-plus，避免双倍费用和延迟。
-    # 如果 app.py 未走该路径（直接调用本函数），此处补处理一次作为 fallback。
-    if context.image_bytes_list and not any(
+    # 除非 context.images_preprocessed=True（由 app.py 在调用本函数前设置），否则补处理一次作为 fallback。
+    if context.image_bytes_list and not context.images_preprocessed and not any(
         "[视觉分析已完成]" in (m.get("content") or "") for m in messages if m.get("role") == "user"
     ):
         print(f"[VISION] fallback: agent_loop 检测到图片未预处理，手动调用视觉分析...")
@@ -227,7 +315,7 @@ def run_agent(
     try:
         client = _build_client(config)
     except Exception as e:
-        return "error", f"AI 客户端初始化失败: {e}"
+        return "error", f"AI 客户端初始化失败: {e}", [], []
 
     # 主循环
     for step in range(config.max_steps):
@@ -241,15 +329,15 @@ def run_agent(
                 temperature=0.3,
             )
         except openai.APITimeoutError:
-            return "error", f"API 调用超时（{config.timeout_seconds}秒）"
+            return "error", f"API 调用超时（{config.timeout_seconds}秒）", [], []
         except openai.APIConnectionError:
-            return "error", "网络连接失败，请检查网络后重试"
+            return "error", "网络连接失败，请检查网络后重试", [], []
         except openai.RateLimitError:
-            return "error", "API 频率超限，请稍后重试"
+            return "error", "API 频率超限，请稍后重试", [], []
         except openai.AuthenticationError:
-            return "error", "API Key 认证失败，请检查密钥配置"
+            return "error", "API Key 认证失败，请检查密钥配置", [], []
         except Exception as e:
-            return "error", f"AI 请求失败: {str(e)}"
+            return "error", f"AI 请求失败: {str(e)}", [], []
 
         assistant_msg = response.choices[0].message
         messages.append(assistant_msg.model_dump(exclude_none=True))
@@ -261,9 +349,9 @@ def run_agent(
                 continue
             try:
                 result = _extract_final_report(content)
-                return "report", result
+                return "report", result, defects, image_labels
             except Exception:
-                return "ask", content
+                return "ask", content, [], []
 
         # 执行工具调用
         for call in assistant_msg.tool_calls:
@@ -299,7 +387,7 @@ def run_agent(
                 }
             )
 
-    return "error", f"Agent 在 {config.max_steps} 步内未收敛，请缩短任务范围或重试"
+    return "error", f"Agent 在 {config.max_steps} 步内未收敛，请缩短任务范围或重试", [], []
 
 
 def _build_client(config: AgentConfig) -> openai.OpenAI:
