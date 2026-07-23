@@ -264,45 +264,41 @@ def run_agent(
 
     # ===== 深度模式（默认）：Agent 多轮推理 + 工具调用 =====
     # 图片预分析已在 app.py handle_user_input 中完成并注入到 messages。
-    # agent_loop.py 不再重复调用 qwen-vl-plus，避免双倍费用和延迟。
-    # 除非 context.images_preprocessed=True（由 app.py 在调用本函数前设置），否则补处理一次作为 fallback。
-    if context.image_bytes_list and not context.images_preprocessed and not any(
+    # 如果 images_preprocessed=True（由 app.py 设置），跳过所有视觉处理。
+    # 否则补处理一次作为 fallback。
+    if context.images_preprocessed:
+        # app.py 已完成视觉分析，run_agent 不再干预
+        ok = True
+        defects = []
+        image_labels = []
+        print("[VISION] 已预处理，跳过 agent_loop 中的视觉分析")
+    elif context.image_bytes_list and not any(
         "[视觉分析已完成]" in (m.get("content") or "") for m in messages if m.get("role") == "user"
     ):
         print(f"[VISION] fallback: agent_loop 检测到图片未预处理，手动调用视觉分析...")
         ok, conclusion_or_error, defects, image_labels = analyze_images_vision(config, context)
-    else:
-        # 已预处理，跳过
-        ok = True
-        conclusion_or_error = "图片已由 app.py 预处理"
-        defects = []
-        image_labels = []
-
-    if ok:
-        # 把视觉分析结果注入消息和上下文
-        vision_msg = (
-            "[图片分析结果]\n"
-            f"- 初步结论：{conclusion_or_error}\n"
-            f"- 发现缺陷：{len(defects)} 项\n"
-        )
-        for i, d in enumerate(defects[:10], 1):
-            vision_msg += (
-                f"  {i}. {d.get('image', image_labels[min(i-1, len(image_labels)-1)] if image_labels else '图')}"
-                f" {d.get('type', '未知')} × {d.get('quantity', 0)}件"
-                f"（{d.get('severity', '次要')}）{d.get('description', '')}\n"
+        if ok:
+            vision_msg = (
+                "[图片分析结果]\n"
+                f"- 初步结论：{conclusion_or_error}\n"
+                f"- 发现缺陷：{len(defects)} 项\n"
             )
-        # 追加一条 user 消息告知 Agent 视觉分析已完成
-        messages.append({
-            "role": "user",
-            "content": vision_msg + "\n请基于以上图片分析结果，调用工具查询必要的标准/历史/档案后，给出最终结论。"
-        })
-    else:
-        # 视觉分析失败也要继续（保留旧逻辑）
-        messages.append({
-            "role": "user",
-            "content": f"[图片分析失败] {conclusion_or_error}\n请基于已知信息推理。"
-        })
-        print(f"[VISION] 视觉分析失败: {conclusion_or_error}")
+            for i, d in enumerate(defects[:10], 1):
+                vision_msg += (
+                    f"  {i}. {d.get('image', image_labels[min(i-1, len(image_labels)-1)] if image_labels else '图')}"
+                    f" {d.get('type', '未知')} × {d.get('quantity', 0)}件"
+                    f"（{d.get('severity', '次要')}）{d.get('description', '')}\n"
+                )
+            messages.append({
+                "role": "user",
+                "content": vision_msg + "\n请基于以上图片分析结果，调用工具查询必要的标准/历史/档案后，给出最终结论。"
+            })
+        else:
+            messages.append({
+                "role": "user",
+                "content": f"[图片分析失败] {conclusion_or_error}\n请基于已知信息推理。"
+            })
+            print(f"[VISION] 视觉分析失败: {conclusion_or_error}")
 
     # 构建 system prompt（含先验知识）
     system_content = context.build_prior_context() + config.system_prompt
