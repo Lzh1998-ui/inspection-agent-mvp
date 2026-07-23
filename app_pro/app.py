@@ -143,6 +143,8 @@ def init_session_state():
         "analysis_triggered": False,  # 防重复自动触发锁
         "trigger_signature": None,    # 上一次触发时的图片签名（去重 key）
         "mode": "intelligent",  # "intelligent" | "fast"
+        "pdf_bytes": None,            # 已生成的 PDF 字节（持久化按钮用）
+        "pdf_filename": None,         # 下载时的默认文件名
     }
     for key, val in defaults.items():
         if key not in st.session_state:
@@ -570,7 +572,7 @@ def _render_final_report(report: dict):
 
 
 def _export_pdf(report: dict):
-    """生成并下载 PDF。"""
+    """生成 PDF 并存入 session_state，下方会持久渲染下载按钮。"""
     font_ok = check_font_available()
     if not font_ok:
         st.warning(get_font_warning_message())
@@ -598,14 +600,10 @@ def _export_pdf(report: dict):
         }
 
         pdf_bytes = generate_inspection_pdf(report_data, st.session_state.uploaded_files)
-        st.success("PDF 生成成功！")
-        st.download_button(
-            "⬇️ 下载 PDF",
-            data=pdf_bytes,
-            file_name=f"{report_data['report_id']}.pdf",
-            mime="application/pdf",
-            use_container_width=True,
-        )
+        # 存入 session_state，以便任何后续 rerun 都能持久显示下载按钮
+        st.session_state.pdf_bytes = pdf_bytes
+        st.session_state.pdf_filename = f"{report_data['report_id']}.pdf"
+        st.success("✅ PDF 生成成功！请到页面下方『报告下载』区域点击下载。")
     except Exception as e:
         st.error(f"PDF 生成失败: {e}")
 
@@ -761,6 +759,20 @@ def main():
     init_session_state()
     render_sidebar()
 
+    # ===== PDF 下载区（任何时候只要 PDF 已生成就显示）=====
+    def render_pdf_download():
+        """持久化 PDF 下载按钮，写入 session_state 后任何 rerun 都能显示。"""
+        if st.session_state.pdf_bytes:
+            st.markdown("---")
+            st.markdown("#### 📥 报告下载")
+            st.download_button(
+                "⬇️ 下载 PDF 报告",
+                data=st.session_state.pdf_bytes,
+                file_name=st.session_state.pdf_filename or "report.pdf",
+                mime="application/pdf",
+                use_container_width=True,
+            )
+
     # 顶部品牌栏
     st.markdown(
         """
@@ -770,6 +782,8 @@ def main():
     """,
         unsafe_allow_html=True,
     )
+
+    render_pdf_download()
 
     # 图片上传
     render_upload()
@@ -805,6 +819,8 @@ def main():
                 st.session_state.agent_finished = False
                 st.session_state.analysis_triggered = False
                 st.session_state.trigger_signature = None
+                st.session_state.pdf_bytes = None
+                st.session_state.pdf_filename = None
                 st.rerun()
 
         if user_input:
@@ -844,6 +860,8 @@ def main():
                 st.session_state.agent_finished = False
                 st.session_state.analysis_triggered = False
                 st.session_state.trigger_signature = None
+                st.session_state.pdf_bytes = None
+                st.session_state.pdf_filename = None
                 st.rerun()
 
         if start_inspection:
