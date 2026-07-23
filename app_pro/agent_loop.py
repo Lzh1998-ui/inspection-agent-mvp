@@ -179,22 +179,40 @@ class AgentContext:
 def _run_agent_fast(
     config: AgentConfig,
     context: AgentContext,
+    vote_rounds: int = 3,
 ) -> tuple[Literal["report"], dict, list[dict], list[str]] | tuple[Literal["error"], str, list, list]:
     """
-    极速模式：单次视觉分析 + AQL 确定性规则，5~15 秒完成。
+    极速模式：多次视觉识别投票 + AQL 确定性规则，5~15 秒完成。
 
     不调用 Agent 推理模型，直接：
-    1. qwen-vl-plus 识别缺陷
-    2. judge_three_layer() 确定性判定
-    3. 返回结构化报告
+    1. qwen-vl-plus 识别缺陷 vote_rounds 次
+    2. _consensus_defects() 投票法合并结果，保留 ≥半数轮次出现的缺陷
+    3. judge_three_layer() 确定性判定
+    4. 返回结构化报告
+
+    vote_rounds: 投票轮次，默认 3 轮。增大可提升一致性但增加延迟。
     """
     if not context.image_bytes_list:
         return "error", "请先上传产品图片", [], []
 
-    # 调用视觉分析
-    ok, conclusion_or_error, defects, image_labels = analyze_images_vision(config, context)
-    if not ok:
-        return "error", f"图片分析失败：{conclusion_or_error}", [], []
+    # 多次调用视觉分析 + 投票
+    all_rounds: list[list[dict]] = []
+    last_error = None
+    for round_idx in range(vote_rounds):
+        ok, conclusion_or_error, defects, image_labels = analyze_images_vision(config, context)
+        if ok:
+            all_rounds.append(defects)
+        else:
+            last_error = conclusion_or_error
+            # 某轮失败不中断，继续投票
+
+    if not all_rounds:
+        return "error", f"图片分析失败：{last_error or '未知错误'}", [], []
+
+    # 投票法合并缺陷
+    defects = _consensus_defects(all_rounds, vote_threshold=2)
+    # 标准化 image_labels（仅一次调用产生的，重复调用会有重复）
+    image_labels = [f"图{i+1}" for i in range(len(context.image_bytes_list[:6]))]
 
     # 基于真实 AQL 计算三层判定
     if context.acre is None and context.order_quantity:
@@ -233,6 +251,84 @@ def _run_agent_fast(
     }
 
     return "report", report, defects, image_labels
+
+
+def _consensus_defects(
+    rounds: list[list[dict]],
+    vote_threshold: int = 2,
+) -> list[dict]:
+    """
+    多轮缺陷识别投票合并。
+
+    算法：
+    1. 按 (normalized_type, severity) 分组
+    2. 同一组出现的轮次 ≥ vote_threshold 才保留
+    3. quantity 取所有轮次的中位数（避免极端值）
+    4. description 取描述最长的那一条
+    5. image 取第一次出现的标签
+
+    参数：
+        rounds: 多轮识别的缺陷列表，每个元素是一轮的 defects list
+        vote_threshold: 至少在多少轮中出现才保留（默认 2，3轮中超过半数）
+
+    返回：
+        合并后的缺陷列表
+    """
+    import statistics
+
+    # 缺陷类型归一化映射
+    TYPE_ALIASES = {
+        "划痕": "划痕", "擦伤": "划痕", "刮痕": "划痕", "scuff": "划痕",
+        "凹陷": "凹陷", "变形": "凹陷", "坑": "凹陷", "dent": "凹陷",
+        "色差": "色差", "颜色不均": "色差", "褪色": "色差", "color": "色差",
+        "裂纹": "裂纹", "裂痕": "裂纹", "crack": "裂纹",
+        "缺口": "缺口", "崩口": "缺口", "缺损": "缺口",
+        "污染": "污染", "污渍": "污染", "油污": "污染", "stain": "污染",
+        "划痕凹陷": "凹陷",  # 合并复合名
+        "包装破损": "包装破损", "包装变形": "包装破损",
+    }
+
+    def normalize_type(t: str) -> str:
+        t = (t or "").strip().lower()
+        for k, v in TYPE_ALIASES.items():
+            if k.lower() in t or t in k.lower():
+                return v
+        return t if t else "未知"
+
+    # 按 (normalized_type, severity) 分组
+    groups: dict[tuple[str, str], list[dict]] = {}
+    for round_defects in rounds:
+        for d in round_defects:
+            if not isinstance(d, dict):
+                continue
+            key = (normalize_type(d.get("type", "")), d.get("severity", "次要"))
+            groups.setdefault(key, []).append(d)
+
+    # 过滤：出现轮次 ≥ vote_threshold
+    consensus = []
+    for (ntype, sev), group_list in groups.items():
+        if len(group_list) < vote_threshold:
+            continue
+        quantities = [int(d.get("quantity", 0)) for d in group_list]
+        quantities = [q for q in quantities if q >= 0]
+        median_qty = int(statistics.median(quantities)) if quantities else 0
+        descriptions = [d.get("description", "") for d in group_list if d.get("description")]
+        best_desc = max(descriptions, key=len) if descriptions else ""
+        first_image = next((d.get("image", "图1") for d in group_list if d.get("image")), "图1")
+        consensus.append({
+            "type": ntype,
+            "quantity": median_qty,
+            "severity": sev,
+            "description": best_desc,
+            "image": first_image,
+            "_vote_count": len(group_list),
+            "_total_rounds": len(rounds),
+        })
+
+    # 按严重程度排序：致命 > 主要 > 次要
+    sev_order = {"致命": 0, "主要": 1, "次要": 2}
+    consensus.sort(key=lambda x: sev_order.get(x["severity"], 3))
+    return consensus
 
 
 def _generate_recommendation(conclusion: str, defects: list[dict]) -> str:
