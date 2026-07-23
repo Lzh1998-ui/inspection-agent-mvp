@@ -786,10 +786,16 @@ def main():
         # ===== 智能模式 =====
         render_chat()
 
-        # 开始分析按钮
+        # 开始验货按钮（取消自动触发，用户主动点击）
         col_start, col_reset = st.columns([4, 1])
         with col_start:
             user_input = st.chat_input("输入消息，或描述问题/补充信息...")
+            start_inspection = st.button(
+                "🔍 开始验货",
+                type="primary",
+                use_container_width=True,
+                help="点击后开始对已上传的图片进行验货",
+            )
         with col_reset:
             if st.button("🔄 重置", use_container_width=True):
                 for k in ["agent_messages", "tool_calls"]:
@@ -803,17 +809,16 @@ def main():
 
         if user_input:
             handle_user_input(user_input)
-        elif (
-            st.session_state.image_bytes_list
-            and not st.session_state.analysis_triggered
-        ):
-            # 自动触发：上传了新图片且尚未触发过 → Agent 自动开始分析
-            handle_user_input("请分析我刚上传的图片，给出验货结论。")
+        elif start_inspection:
+            # 按钮触发：重置触发锁后启动一轮新验货（防双触发）
+            st.session_state.analysis_triggered = False
+            st.session_state.agent_finished = False
+            handle_user_input("请分析我上传的图片，给出验货结论。")
 
         # 如果没有对话历史，给出引导
         if not st.session_state.agent_messages:
             st.info(
-                "👋 填写左侧参数并上传图片后，Agent 会自动开始分析；"
+                "👋 填写左侧参数并上传图片后，点击「🔍 开始验货」即可启动 Agent 分析；"
                 "也可在下方输入框补充说明或提问。"
             )
 
@@ -824,7 +829,12 @@ def main():
 
         col_start, col_reset = st.columns([4, 1])
         with col_start:
-            manual_start = st.button("🚀 开始分析", type="primary", use_container_width=True)
+            start_inspection = st.button(
+                "🔍 开始验货",
+                type="primary",
+                use_container_width=True,
+                help="点击后开始对已上传的图片进行验货",
+            )
         with col_reset:
             if st.button("🔄 重置", use_container_width=True, key="fast_reset"):
                 for k in ["agent_messages", "tool_calls"]:
@@ -836,16 +846,12 @@ def main():
                 st.session_state.trigger_signature = None
                 st.rerun()
 
-        if manual_start:
-            handle_user_input("请分析我上传的图片，给出验货结论。")
-        elif (
-            st.session_state.image_bytes_list
-            and not st.session_state.analysis_triggered
-        ):
-            # 自动触发：上传图片后自动开始极速分析
+        if start_inspection:
+            st.session_state.analysis_triggered = False
+            st.session_state.agent_finished = False
             handle_user_input("请分析我上传的图片，给出验货结论。")
         elif not st.session_state.final_report:
-            st.info("👋 填写左侧参数并上传图片后，将自动开始极速分析（或点击“开始分析”）。")
+            st.info("👋 填写左侧参数并上传图片后，点击「🔍 开始验货」启动极速分析。")
 
 
 if __name__ == "__main__":
