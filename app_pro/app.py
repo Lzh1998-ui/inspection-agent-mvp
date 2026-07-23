@@ -191,16 +191,22 @@ def render_sidebar():
         st.divider()
 
         # 模式切换
-        mode = st.radio(
-            "运行模式",
-            ["🤖 智能模式", "⚡ 快速模式"],
-            index=0 if st.session_state.mode == "intelligent" else 1,
-            captions=[
-                "Agent 多轮推理，工具调用，查历史/标准/档案",
-                "单轮 AI 分析，无工具（备用）",
-            ],
+        st.markdown("**⚙️ 运行模式**")
+        mode = st.segmented_control(
+            "",
+            {"🤖 智能模式": "intelligent", "⚡ 极速模式": "fast"},
+            default="intelligent" if st.session_state.mode == "intelligent" else "fast",
+            help=None,
         )
-        st.session_state.mode = "intelligent" if "智能" in mode else "fast"
+        if mode is None:
+            mode = st.session_state.mode
+        st.session_state.mode = mode
+
+        # 模式说明
+        if st.session_state.mode == "intelligent":
+            st.caption("🤖 Agent 多轮推理 + 工具调用，约 1~2 分钟")
+        else:
+            st.caption("⚡ 单次 API 调用，约 5~15 秒，保留完整报告")
 
         st.divider()
 
@@ -309,6 +315,15 @@ def handle_user_input(user_input: str):
     ctx.aql_critical = st.session_state.aql_critical
     ctx.aql_major = st.session_state.aql_major
     ctx.aql_minor = st.session_state.aql_minor
+    # 预计算 acre（极速模式需要）
+    if ctx.order_quantity and not ctx.acre:
+        try:
+            from core.aql import compute_three_layer_acre
+            ctx.acre = compute_three_layer_acre(
+                ctx.order_quantity, ctx.aql_critical, ctx.aql_major, ctx.aql_minor
+            )
+        except Exception:
+            pass
     st.session_state.agent_context = ctx
 
     # 构建 messages（含历史）
@@ -321,56 +336,102 @@ def handle_user_input(user_input: str):
     # 追加用户最新输入
     messages.append({"role": "user", "content": user_input})
 
-    # 运行 Agent
+    # 根据模式选择运行方式
+    mode = st.session_state.mode  # "intelligent" | "fast"
+
     with st.chat_message("assistant"):
-        # === 先进行视觉分析（可见状态）===
-        vision_done = False
-        if st.session_state.image_bytes_list:
+        if mode == "fast":
+            # ===== 极速模式：单次 vl-plus 调用 + AQL 确定性规则，约 5~15 秒 =====
+            # 不调用 Agent 推理，避免双倍费用和 1~2 分钟延迟
+            if not st.session_state.image_bytes_list:
+                st.warning("⚡ 极速模式需要上传产品图片，请先上传图片")
+                return
+
             ctx.image_bytes_list = st.session_state.image_bytes_list
-            with st.status("🔍 正在分析图片（qwen-vl-plus）...", expanded=True) as vstatus:
-                from app_pro.agent_loop import analyze_images_vision
-                vok, vresult, vdefects, vlabels = analyze_images_vision(config, ctx)
-                if vok:
+            with st.status("⚡ 极速分析中（单次API调用，约5~15秒）...", expanded=True) as vstatus:
+                # run_agent(mode="fast") 内部会调 analyze_images_vision，返回 4 值
+                status, result, defects, img_labels = run_agent(
+                    messages=messages,
+                    config=config,
+                    context=ctx,
+                    tools_schema=TOOLS_SCHEMA,
+                    tool_registry=TOOL_REGISTRY,
+                    mode="fast",
+                )
+                if status == "report":
                     vstatus.update(
-                        label=f"✅ 图片分析完成：{vresult}（发现 {len(vdefects)} 项缺陷）",
+                        label=f"✅ 分析完成！发现 {len(defects)} 项缺陷（qwen-vl-plus）",
                         state="complete",
                     )
-                    vision_done = True
-                    # 把视觉分析结果插入 messages
-                    vision_summary = (
-                        f"[视觉分析已完成]\n"
-                        f"初步结论：{vresult}\n"
-                        f"缺陷数量：{len(vdefects)} 项\n"
-                    )
-                    for i, d in enumerate(vdefects[:10], 1):
-                        vision_summary += (
-                            f"  {i}. {d.get('type', '未知')} × {d.get('quantity', 0)}件"
-                            f"（{d.get('severity', '次要')}）{d.get('description', '')}\n"
-                        )
-                    vision_summary += "\n以上是 qwen-vl-plus 识别结果，请不要再问'请分享图片'。\n"
-                    messages.append({"role": "user", "content": vision_summary})
-
-                    # 在 UI 上直接展示缺陷清单
-                    if vdefects:
-                        st.markdown("**🔍 视觉识别到的缺陷：**")
-                        for d in vdefects[:10]:
+                    # UI 直接展示缺陷
+                    if defects:
+                        st.markdown("**🔍 识别到的缺陷：**")
+                        for d in defects[:10]:
                             sev_icon = {"致命": "🔴", "主要": "🟡", "次要": "🟢"}.get(d.get("severity", "次要"), "⚪")
                             st.markdown(
                                 f"- {sev_icon} **{d.get('type', '未知')}** × {d.get('quantity', 0)}件"
                                 f" — {d.get('description', '')}"
                             )
+                    st.session_state.final_report = result
+                    st.session_state.agent_finished = True
+                    _render_final_report(result)
+                    return  # 极速模式不走下面的通用处理
                 else:
-                    vstatus.update(label=f"❌ 图片分析失败：{vresult}", state="error")
-                    st.error(f"视觉分析错误：{vresult}")
+                    vstatus.update(label=f"❌ 分析失败：{result}", state="error")
+                    st.error(f"极速分析失败：{result}")
+                    return
+        else:
+            # ===== 智能模式：视觉分析（可见状态）+ Agent 推理 =====
+            vision_done = False
+            if st.session_state.image_bytes_list:
+                ctx.image_bytes_list = st.session_state.image_bytes_list
+                # 标记图片已预处理，避免 agent_loop 重复调用 vl-plus
+                ctx.images_preprocessed = True
+                with st.status("🔍 正在分析图片（qwen-vl-plus）...", expanded=True) as vstatus:
+                    from app_pro.agent_loop import analyze_images_vision
+                    vok, vresult, vdefects, vlabels = analyze_images_vision(config, ctx)
+                    if vok:
+                        vstatus.update(
+                            label=f"✅ 图片分析完成：{vresult}（发现 {len(vdefects)} 项缺陷）",
+                            state="complete",
+                        )
+                        vision_done = True
+                        # 把视觉分析结果插入 messages
+                        vision_summary = (
+                            f"[视觉分析已完成]\n"
+                            f"初步结论：{vresult}\n"
+                            f"缺陷数量：{len(vdefects)} 项\n"
+                        )
+                        for i, d in enumerate(vdefects[:10], 1):
+                            vision_summary += (
+                                f"  {i}. {d.get('type', '未知')} × {d.get('quantity', 0)}件"
+                                f"（{d.get('severity', '次要')}）{d.get('description', '')}\n"
+                            )
+                        vision_summary += "\n以上是 qwen-vl-plus 识别结果，请不要再问'请分享图片'。\n"
+                        messages.append({"role": "user", "content": vision_summary})
 
-        with st.spinner("Agent 推理中..."):
-            status, result = run_agent(
-                messages=messages,
-                config=config,
-                context=ctx,
-                tools_schema=TOOLS_SCHEMA,
-                tool_registry=TOOL_REGISTRY,
-            )
+                        # 在 UI 上直接展示缺陷清单
+                        if vdefects:
+                            st.markdown("**🔍 视觉识别到的缺陷：**")
+                            for d in vdefects[:10]:
+                                sev_icon = {"致命": "🔴", "主要": "🟡", "次要": "🟢"}.get(d.get("severity", "次要"), "⚪")
+                                st.markdown(
+                                    f"- {sev_icon} **{d.get('type', '未知')}** × {d.get('quantity', 0)}件"
+                                    f" — {d.get('description', '')}"
+                                )
+                    else:
+                        vstatus.update(label=f"❌ 图片分析失败：{vresult}", state="error")
+                        st.error(f"视觉分析错误：{vresult}")
+
+            with st.spinner("Agent 推理中..."):
+                status, result, _, _ = run_agent(
+                    messages=messages,
+                    config=config,
+                    context=ctx,
+                    tools_schema=TOOLS_SCHEMA,
+                    tool_registry=TOOL_REGISTRY,
+                    mode="intelligent",
+                )
 
         if status == "ask":
             st.session_state.agent_messages.append({"role": "assistant", "content": result})
