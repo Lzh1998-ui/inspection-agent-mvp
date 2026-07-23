@@ -285,7 +285,18 @@ def render_chat():
     # 展示对话历史
     for msg in st.session_state.agent_messages:
         with st.chat_message(msg["role"]):
-            st.markdown(msg["content"])
+            content = msg.get("content", "")
+            # content 可能是 list（含 image_url/base64），此时只渲染文本，避免把整段
+            # base64 图片数据当字符串刷到界面上。
+            if isinstance(content, list):
+                text_parts = [
+                    c.get("text", "")
+                    for c in content
+                    if isinstance(c, dict) and c.get("type") == "text"
+                ]
+                st.markdown("\n".join(text_parts) or "(图片)")
+            else:
+                st.markdown(content)
 
     # 工具调用记录
     for tc in st.session_state.tool_calls:
@@ -340,7 +351,11 @@ def handle_user_input(user_input: str):
     st.session_state.agent_context = ctx
 
     # 构建 messages（含历史）
-    messages = list(st.session_state.agent_messages)
+    # 必须用深拷贝：_inject_images_to_messages 会把 base64 图片写入 content，
+    # 若只做浅拷贝，会污染 st.session_state.agent_messages 里的原始消息对象，
+    # 导致 rerun 后 render_chat 把整段 base64 当文本渲染出来。
+    import copy
+    messages = copy.deepcopy(st.session_state.agent_messages)
 
     # 注入图片（如果用户发了图片）
     if st.session_state.image_bytes_list:
