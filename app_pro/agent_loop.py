@@ -75,7 +75,11 @@ _DEFAULT_SYSTEM_PROMPT = (
     "- quantity 必须是整数，禁止'若干'、'多个'\n"
     "- 如果信息严重不足，先追问，不要瞎判\n"
     "- 工具调用结果仅供参考，最终以你的专业判断为准\n"
-    "- 保持对话友好、专业，有礼有据"
+    "- 保持对话友好、专业，有礼有据\n\n"
+    "【图片处理规则】\n"
+    "- 如果用户上传了图片，系统会自动先用 qwen-vl-plus 做视觉分析，把缺陷结果插入到对话中（以 [图片分析结果] 开头）。\n"
+    "- 一旦看到 [图片分析结果] 消息，**严禁**再问'请分享图片'或'我没看到图片'——图片已被系统读取。\n"
+    "- 直接基于该结果继续追问或出报告即可。"
 )
 
 
@@ -175,9 +179,16 @@ def run_agent(
     # 原因：Agent 主循环使用的是 qwen-max 文本模型，无法直接看图。
     # 需要先用 qwen-vl-plus 做视觉分析，把缺陷数据注入上下文。
     if context.image_bytes_list:
-        ok, conclusion_or_error, defects, image_labels = analyze_images_vision(
-            config, context
-        )
+        print(f"[VISION] 检测到 {len(context.image_bytes_list)} 张图片，启动视觉分析...")
+        try:
+            ok, conclusion_or_error, defects, image_labels = analyze_images_vision(
+                config, context
+            )
+            print(f"[VISION] ok={ok}, conclusion={conclusion_or_error[:50]}, defects={len(defects)}")
+        except Exception as e:
+            print(f"[VISION] 视觉分析异常: {e}")
+            ok, conclusion_or_error, defects, image_labels = False, f"视觉分析异常: {e}", [], []
+
         if ok:
             # 把视觉分析结果注入消息和上下文
             vision_msg = (
@@ -202,6 +213,7 @@ def run_agent(
                 "role": "user",
                 "content": f"[图片分析失败] {conclusion_or_error}\n请基于已知信息推理。"
             })
+            print(f"[VISION] 视觉分析失败: {conclusion_or_error}")
 
     # 构建 system prompt（含先验知识）
     system_content = context.build_prior_context() + config.system_prompt
@@ -374,13 +386,27 @@ def analyze_images_vision(
         except Exception:
             pass
 
-    text_parts = [f"请分析产品：{context.product_name}"]
+    text_parts = [
+        "你是一位专业的验货质检员，请仔细查看图片识别缺陷。",
+        f"产品名称：{context.product_name or '未指定'}",
+    ]
     if prior_conclusion:
         text_parts.append(f"\n【上轮分析】：{prior_conclusion}")
     if context.inspection_standard:
         text_parts.append(f"验货标准：{context.inspection_standard}")
     if aql_hint:
         text_parts.append(f"\n{aql_hint}")
+
+    text_parts.append(
+        "\n请识别图片中可见的产品问题（划痕、损伤、变形、色差、功能异常、包装破损等），"
+        "并严格按以下 JSON 格式输出，不要多余说明：\n"
+        '{\n'
+        '  "conclusion": "合格/不合格/有条件接受",\n'
+        '  "defects": [\n'
+        '    {"type": "缺陷类型", "quantity": 数字, "severity": "致命/主要/次要", "description": "描述", "image": "图1"}\n'
+        '  ]\n'
+        '}'
+    )
 
     user_content = [
         {"type": "text", "text": "\n".join(text_parts)},
