@@ -145,6 +145,7 @@ def init_session_state():
         "mode": "turbo",  # "turbo" | "fast" | "intelligent"
         "pdf_bytes": None,            # 已生成的 PDF 字节（持久化按钮用）
         "pdf_filename": None,         # 下载时的默认文件名
+        "_report_saved": False,     # 本次会话报告是否已入库（防重复写入）
     }
     for key, val in defaults.items():
         if key not in st.session_state:
@@ -288,7 +289,141 @@ def render_sidebar():
             )
 
         st.divider()
+        _render_history_panel()
         show_user_info()
+
+
+# ============================================================================
+# 历史报告（侧边栏）
+# ============================================================================
+
+
+def _render_history_panel():
+    """侧边栏历史报告面板：查询 Supabase 并允许回看。"""
+    with st.expander("📁 历史报告", expanded=False):
+        if st.button("🔄 刷新历史", use_container_width=True, key="hist_refresh"):
+            st.session_state._hist_rows = None
+        try:
+            from app_pro.tools import _get_supabase
+            client = _get_supabase()
+        except Exception:
+            client = None
+        if client is None:
+            st.warning("Supabase 未配置，无法加载历史")
+            return
+
+        if st.session_state.get("_hist_rows") is None:
+            try:
+                resp = (
+                    client.table("inspection_reports")
+                    .select("*")
+                    .order("created_at", desc=True)
+                    .limit(50)
+                    .execute()
+                )
+                st.session_state._hist_rows = resp.data or []
+            except Exception as e:
+                st.error(f"加载历史失败：{e}")
+                st.session_state._hist_rows = []
+
+        rows = st.session_state.get("_hist_rows", [])
+        if not rows:
+            st.info("暂无历史报告。验货一次后会自动保存。")
+            return
+
+        options = []
+        for r in rows:
+            prod = (r.get("product_name") or "?") or "?"
+            date = str(r.get("created_at", ""))[:10]
+            concl = (r.get("conclusion") or "").replace(" ", "")
+            icon = {"合格": "✅", "不合格": "❌", "有条件接受": "⚠️"}.get(concl, "📋")
+            options.append(f"{icon} {prod} · {date}")
+
+        sel = st.selectbox("选择报告查看", options, key="hist_sel", index=0)
+        if sel:
+            idx = options.index(sel)
+            _render_historical_report(rows[idx])
+
+
+def _render_historical_report(row: dict):
+    """只读渲染一条历史报告（不重复入库、不依赖当前图片）。"""
+    report = {
+        "conclusion": row.get("conclusion", ""),
+        "three_layer_result": row.get("three_layer_result") or {},
+        "defects": row.get("defects") or [],
+        "recommendation": row.get("recommendation", ""),
+        "confidence": row.get("confidence", 0.0),
+    }
+    conclusion = report["conclusion"]
+    emoji = {"合格": "✅", "不合格": "❌", "有条件接受": "⚠️"}.get(conclusion, "📋")
+    st.markdown(f"### {emoji} {conclusion}")
+    st.caption(
+        f"产品：{row.get('product_name', '')} ｜ 工厂：{row.get('factory_name') or '未提供'}"
+        f" ｜ 日期：{str(row.get('created_at', ''))[:10]}"
+    )
+
+    three = report["three_layer_result"]
+    c1, c2, c3 = st.columns(3)
+    for col, key, label in zip(
+        [c1, c2, c3], ["critical", "major", "minor"], ["致命缺陷", "主要缺陷", "次要缺陷"]
+    ):
+        layer = three.get(key, {})
+        passed = layer.get("passed", None)
+        icon = "✅" if passed else "❌" if passed is False else "➖"
+        with col:
+            st.markdown(f"**{label}**：{icon} {'通过' if passed else '不通过' if passed is False else '—'}")
+            st.caption(f"缺陷 {layer.get('defect_count', 0)}")
+
+    defects = extract_defects_from_report(report)
+    if defects:
+        with st.expander(f"📋 缺陷清单（共 {len(defects)} 项）", expanded=False):
+            for i, d in enumerate(defects, 1):
+                sev_color = {"致命": "🔴", "主要": "🟡", "次要": "🟢"}.get(d["severity"], "⚪")
+                st.markdown(
+                    f"{sev_color} #{i} **{d['type']}** × {d['quantity']}件 "
+                    f"（{d['severity']}）{d['image']}"
+                )
+                if d["description"]:
+                    st.caption(f"   {d['description']}")
+
+    rec = report.get("recommendation", "")
+    if rec:
+        st.success(f"💡 **{rec}**")
+
+    # 导出 PDF（历史数据，无图片）
+    if st.button("⬇️ 导出此报告 PDF", key="hist_pdf"):
+        try:
+            report_data = {
+                "report_id": f"RPT-HIST-{str(row.get('id', ''))[:8]}",
+                "product_name": row.get("product_name", ""),
+                "factory_name": row.get("factory_name") or "未提供",
+                "order_quantity": row.get("order_quantity") or 0,
+                "inspection_standard": (
+                    f"致命:{row.get('aql_critical', 'AQL 0.65')} "
+                    f"主要:{row.get('aql_major', 'AQL 2.5')} "
+                    f"次要:{row.get('aql_minor', 'AQL 4.0')}"
+                ),
+                "aql_critical": row.get("aql_critical", "AQL 0.65"),
+                "aql_major": row.get("aql_major", "AQL 2.5"),
+                "aql_minor": row.get("aql_minor", "AQL 4.0"),
+                "conclusion": report["conclusion"],
+                "three_layer_result": report["three_layer_result"],
+                "defects": report["defects"],
+                "recommendation": report["recommendation"],
+                "confidence": report.get("confidence", 0.8),
+                "sample_size": row.get("sample_size") or "N/A",
+                "inspection_date": str(row.get("created_at", ""))[:10],
+            }
+            pdf_bytes = generate_inspection_pdf(report_data, [])
+            st.download_button(
+                "📥 下载 PDF",
+                data=pdf_bytes,
+                file_name=f"{report_data['report_id']}.pdf",
+                mime="application/pdf",
+                use_container_width=True,
+            )
+        except Exception as e:
+            st.error(f"PDF 生成失败：{e}")
 
 
 # ============================================================================
@@ -333,6 +468,7 @@ def handle_user_input(user_input: str):
     """处理用户文本输入，追加到对话历史并触发 Agent 推理。"""
     # 标记已触发（防自动触发重复调用）
     st.session_state.analysis_triggered = True
+    st.session_state._report_saved = False  # 新一轮：允许重新入库
     st.session_state.agent_messages.append({"role": "user", "content": user_input})
     with st.chat_message("user"):
         st.markdown(user_input)
@@ -564,12 +700,81 @@ def _reply(text: str):
 
 
 # ============================================================================
+# 报告入库（Supabase）
+# ============================================================================
+
+
+def _get_current_user_email() -> str | None:
+    """best-effort 获取当前登录用户邮箱。"""
+    try:
+        if hasattr(st, "user") and getattr(st.user, "is_logged_in", False):
+            return getattr(st.user, "email", None)
+    except Exception:
+        pass
+    return st.session_state.get("user_email") or None
+
+
+def _save_report_to_supabase(report: dict):
+    """
+    把验货报告写入 Supabase `inspection_reports` 表。
+    供智能模式工具（search_defect_history / get_product_profile）查询真实历史。
+    失败不阻断主流程（报告照常展示 + PDF 照常生成）。
+    """
+    try:
+        from app_pro.tools import _get_supabase
+        client = _get_supabase()
+        if client is None:
+            logger.warning("[DB] Supabase 未配置，跳过报告入库")
+            return
+
+        # 抽样方案（与 PDF 计算一致）
+        sample_size = None
+        try:
+            oq = int(st.session_state.order_quantity or 0)
+        except (TypeError, ValueError):
+            oq = 0
+        if oq > 0:
+            try:
+                acre = compute_three_layer_acre(
+                    oq,
+                    st.session_state.aql_critical,
+                    st.session_state.aql_major,
+                    st.session_state.aql_minor,
+                )
+                sample_size = int(acre["critical"]["sample_size"])
+            except Exception:
+                pass
+
+        row = {
+            "user_email": _get_current_user_email() or "anonymous",
+            "product_name": (st.session_state.product_name or "").strip(),
+            "factory_name": (st.session_state.factory_name or "").strip() or None,
+            "order_quantity": oq or None,
+            "aql_critical": st.session_state.aql_critical,
+            "aql_major": st.session_state.aql_major,
+            "aql_minor": st.session_state.aql_minor,
+            "conclusion": report.get("conclusion", ""),
+            "three_layer_result": report.get("three_layer_result", {}),
+            "defects": report.get("defects", []),
+            "recommendation": report.get("recommendation", ""),
+            "confidence": float(report.get("confidence", 0.0) or 0.0),
+            "report_mode": report.get("mode", "unknown"),
+            "sample_size": sample_size,
+            "pdf_filename": st.session_state.get("pdf_filename"),
+        }
+        client.table("inspection_reports").insert(row).execute()
+        logger.info("[DB] 报告已入库: %s", row["product_name"])
+    except Exception as e:
+        logger.warning("[DB] 报告入库失败（不影响展示）: %s", e)
+
+
+# ============================================================================
 # 最终报告渲染
 # ============================================================================
 
 
 def _render_final_report(report: dict):
-    """渲染 Agent 最终报告（chat 内 + 侧边操作）。"""
+    """渲染 Agent 最终报告（chat 内 + 侧边操作），并触发入库与 PDF。"""
     conclusion = report.get("conclusion", "未知")
     emoji = {"合格": "✅", "不合格": "❌", "有条件接受": "⚠️"}.get(conclusion, "📋")
 
@@ -611,6 +816,11 @@ def _render_final_report(report: dict):
         st.success(f"💡 **{rec}**")
 
     st.divider()
+
+    # ===== 报告入库（Supabase，供工具/历史查询）=====
+    if not st.session_state.get("_report_saved", False):
+        _save_report_to_supabase(report)
+        st.session_state._report_saved = True
 
     # ===== PDF 自动生成 + 下载 =====
     # 报告生成后自动生成 PDF 并存入 session_state，下载按钮持久显示，无需额外点击
