@@ -566,19 +566,37 @@ def _render_final_report(report: dict):
 
     st.divider()
 
-    # PDF 导出
-    if st.button("📄 导出报告 PDF", type="primary", use_container_width=True):
-        _export_pdf(report)
+    # ===== PDF 自动生成 + 下载 =====
+    # 报告生成后自动生成 PDF 并存入 session_state，下载按钮持久显示，无需额外点击
+    if not st.session_state.pdf_bytes:
+        with st.spinner("正在生成 PDF 报告..."):
+            _generate_pdf_bytes(report)
+    if st.session_state.pdf_bytes:
+        st.success("✅ PDF 报告已生成，可直接下载：")
+        # 顶部持久区也会同步显示，这里是报告内的直接下载入口
+        st.download_button(
+            "⬇️ 下载 PDF 报告",
+            data=st.session_state.pdf_bytes,
+            file_name=st.session_state.pdf_filename or "report.pdf",
+            mime="application/pdf",
+            use_container_width=True,
+            key="pdf_dl_inline",
+        )
+        if st.button("🔄 重新生成 PDF", use_container_width=True, key="regen_pdf"):
+            st.session_state.pdf_bytes = None
+            st.rerun()
+    else:
+        st.error("PDF 生成失败，请检查字体配置或重试（点 🔄 重置后重新验货）。")
 
 
-def _export_pdf(report: dict):
+def _generate_pdf_bytes(report: dict):
     """生成 PDF 并存入 session_state，下方会持久渲染下载按钮。"""
     font_ok = check_font_available()
     if not font_ok:
         st.warning(get_font_warning_message())
 
     try:
-        # 补全 report_data 字段
+        # 补全 report_data 字段（与报告一致）
         report_data = {
             "report_id": f"RPT-PRO-{datetime.now().strftime('%Y%m%d-%H%M%S')}",
             "product_name": st.session_state.product_name,
@@ -603,8 +621,8 @@ def _export_pdf(report: dict):
         # 存入 session_state，以便任何后续 rerun 都能持久显示下载按钮
         st.session_state.pdf_bytes = pdf_bytes
         st.session_state.pdf_filename = f"{report_data['report_id']}.pdf"
-        st.success("✅ PDF 生成成功！请到页面下方『报告下载』区域点击下载。")
     except Exception as e:
+        st.session_state.pdf_bytes = None
         st.error(f"PDF 生成失败: {e}")
 
 
@@ -829,6 +847,8 @@ def main():
             # 按钮触发：重置触发锁后启动一轮新验货（防双触发）
             st.session_state.analysis_triggered = False
             st.session_state.agent_finished = False
+            st.session_state.pdf_bytes = None
+            st.session_state.pdf_filename = None
             handle_user_input("请分析我上传的图片，给出验货结论。")
 
         # 如果没有对话历史，给出引导
@@ -867,6 +887,8 @@ def main():
         if start_inspection:
             st.session_state.analysis_triggered = False
             st.session_state.agent_finished = False
+            st.session_state.pdf_bytes = None
+            st.session_state.pdf_filename = None
             handle_user_input("请分析我上传的图片，给出验货结论。")
         elif not st.session_state.final_report:
             st.info("👋 填写左侧参数并上传图片后，点击「🔍 开始验货」启动极速分析。")
