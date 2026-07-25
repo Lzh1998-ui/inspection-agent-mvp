@@ -21,6 +21,12 @@ from core.aql import judge_three_layer, format_acre_hint
 
 DEFAULT_TIMEOUT_SECONDS = 60
 
+# ===== 模型能力定义 =====
+# vision_models: 支持图片输入的多模态模型
+# text_models: 纯文本模型（不支持图片）
+VISION_MODELS = {"qwen-vl-plus", "qwen-vl-max", "gpt-4o", "gpt-4o-mini", "gpt-4-turbo"}
+TEXT_MODELS   = {"deepseek-chat", "deepseek-coder", "gpt-3.5-turbo", "gpt-4"}
+
 
 def clean_json_string(s):
     """清理 JSON 字符串中的常见格式问题"""
@@ -29,9 +35,9 @@ def clean_json_string(s):
     # 1. 移除末尾逗号(在 } 或 ] 之前)
     s = re.sub(r',\s*([}\]])', r'\1', s)
     # 2. 移除单引号包裹的字符串值(JSON 要求双引号)
-    # 这是一个保守的修复,只处理明显的单引号问题
     s = re.sub(r"(?<=:)\s*'([^']*)'", r'"\1"', s)
     return s
+
 
 def extract_balanced_json(text):
     """
@@ -71,6 +77,7 @@ def extract_balanced_json(text):
 
     return None
 
+
 def extract_json_robust(text):
     """
     从 AI 响应中鲁棒地提取并解析 JSON
@@ -103,13 +110,13 @@ def extract_json_robust(text):
                 result = json.loads(block_content)
                 return True, result
             except json.JSONDecodeError:
-                # 尝试清理后解析
                 cleaned = clean_json_string(block_content)
                 try:
                     result = json.loads(cleaned)
                     return True, result
                 except json.JSONDecodeError:
                     pass
+
     # ===== 策略3: 括号平衡提取 =====
     json_str = extract_balanced_json(text)
     if json_str:
@@ -131,7 +138,10 @@ def build_ai_client(qwen_key=None, deepseek_key=None, openai_key=None,
                     timeout_seconds=DEFAULT_TIMEOUT_SECONDS):
     """
     根据传入的密钥构建 AI 客户端（纯逻辑，不读取任何 UI/secrets）。
-    优先级:通义千问VL > DeepSeek > OpenAI
+
+    【修复】优先级按"视觉能力"而非硬编码排序：
+      通义千问VL(有vision) > OpenAI GPT-4o(有vision) > DeepSeek(纯文本兜底)
+
     返回: (client, model_name) 或 (None, error_message)
     """
     try:
@@ -142,19 +152,25 @@ def build_ai_client(qwen_key=None, deepseek_key=None, openai_key=None,
                 timeout=httpx.Timeout(timeout_seconds, connect=10.0),
             )
             return client, "qwen-vl-plus"
+
+        if openai_key:
+            # GPT-4o 支持 vision，放在 DeepSeek 前面
+            client = openai.OpenAI(
+                api_key=openai_key,
+                timeout=httpx.Timeout(timeout_seconds, connect=10.0),
+            )
+            return client, "gpt-4o"
+
         if deepseek_key:
+            # 【关键修复】DeepSeek 是纯文本模型，不支持图片
+            # 仅作为纯文本兜底（未来若 deepseek 推出 vision 版本可调整）
             client = openai.OpenAI(
                 api_key=deepseek_key,
                 base_url="https://api.deepseek.com",
                 timeout=httpx.Timeout(timeout_seconds, connect=10.0),
             )
             return client, "deepseek-chat"
-        if openai_key:
-            client = openai.OpenAI(
-                api_key=openai_key,
-                timeout=httpx.Timeout(timeout_seconds, connect=10.0),
-            )
-            return client, "gpt-4o"
+
         return None, "未配置API Key,请在 Streamlit Cloud Secrets 中配置 qwen/deepseek/openai 的 api_key"
     except Exception as e:
         return None, f"API客户端初始化失败:{str(e)}"
@@ -165,15 +181,26 @@ def analyze_images(client, model_name, image_bytes_list, product_name,
     """
     调用 AI Vision API 分析产品图片
     返回: (success, result_or_error_message)
-    acre: compute_three_layer_acre() 的返回值,用于向 AI 注入真实 Ac/Re 并做最终判定
-    """
-    try:
 
+    【前置检查】如果模型不支持视觉输入，在传图前主动报错，
+    避免 API 返回难以理解的错误。
+    """
+    # ===== 前置检查：模型是否支持视觉 =====
+    if model_name not in VISION_MODELS:
+        return False, (
+            f"当前模型「{model_name}」不支持图片分析。"
+            "请在 Streamlit Secrets 中配置以下任一视觉模型密钥：\n"
+            "  • 通义千问（推荐）: 添加 qwen.api_key\n"
+            "  • OpenAI GPT-4o: 添加 openai.api_key\n"
+            "当前配置的 deepseek-chat 是纯文本模型，无法分析图片。"
+        )
+
+    try:
         # 3. 构建消息
         messages = [
             {
-"role": "system",
-"content": """你是一位拥有15年经验的外贸验货专家,精通ISO 2859-1/2抽样标准、AQL质量标准(AQL 0.65/1.0/1.5/2.5/4.0/6.5),熟悉电子产品、纺织品、机械配件、玩具等各类产品的国际质量标准(ISO、ASTM、GB、EN等)。
+                "role": "system",
+                "content": """你是一位拥有15年经验的外贸验货专家,精通ISO 2859-1/2抽样标准、AQL质量标准(AQL 0.65/1.0/1.5/2.5/4.0/6.5),熟悉电子产品、纺织品、机械配件、玩具等各类产品的国际质量标准(ISO、ASTM、GB、EN等)。
 你的任务是根据用户上传的产品图片和指定的AQL标准,进行专业的质量检验分析。
 
 用户上传了多张图片,按顺序编号为:图1、图2、图3...。
@@ -238,7 +265,7 @@ def analyze_images(client, model_name, image_bytes_list, product_name,
             }
         ]
 
-        # 4. 添加图片
+        # 4. 添加图片（传图逻辑本身是正确的，这里保留）
         for image_bytes in image_bytes_list:
             # 图片按上传顺序编号,AI 在分析时引用 "图1/图2/图3" 对应缺陷
             try:
@@ -271,6 +298,15 @@ def analyze_images(client, model_name, image_bytes_list, product_name,
             return False, "API Key 认证失败,请检查密钥是否正确"
         except openai.APIStatusError as e:
             return False, f"API 错误:{e.message}(状态码:{e.status_code})"
+        except Exception as api_error:
+            # 捕获通义千问的特殊错误（如模型不支持 vision）
+            err_msg = str(api_error)
+            if "vision" in err_msg.lower() or "multimodal" in err_msg.lower():
+                return False, (
+                    f"API 返回视觉模型错误:{err_msg}\n"
+                    "请确认使用的是支持多模态的模型版本。"
+                )
+            return False, f"API 调用失败:{err_msg}"
 
         # 6. 解析响应(使用增强版解析器)
         ai_response = response.choices[0].message.content
@@ -286,20 +322,17 @@ def analyze_images(client, model_name, image_bytes_list, product_name,
             result = json.loads(ai_response)
         except json.JSONDecodeError:
             # 尝试提取 ```json ... ``` 中的内容
-            import re
             json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', ai_response, re.DOTALL)
             if json_match:
                 try:
                     result = json.loads(json_match.group(1))
                 except json.JSONDecodeError:
-                    # 最后尝试提取第一个 {...} 块
                     json_match2 = re.search(r'\{.*\}', ai_response, re.DOTALL)
                     if json_match2:
                         result = json.loads(json_match2.group())
                     else:
                         return False, f"AI 返回格式错误,无法解析 JSON。原始响应:{ai_response[:200]}..."
             else:
-                # 尝试直接提取 {...}
                 json_match3 = re.search(r'\{.*\}', ai_response, re.DOTALL)
                 if json_match3:
                     try:
