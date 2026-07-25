@@ -617,6 +617,35 @@ def _generate_pdf_bytes(report: dict):
             "confidence": report.get("confidence", 0.8),
         }
 
+        # ===== 计算抽样方案（样本量 + Ac/Re）=====
+        # 依据 ANSI/ASQ Z1.4 一般检查水平 II，由订单数量查表得到
+        try:
+            oq = int(st.session_state.order_quantity or 0)
+        except (TypeError, ValueError):
+            oq = 0
+        if oq > 0:
+            acre = compute_three_layer_acre(
+                oq,
+                st.session_state.aql_critical,
+                st.session_state.aql_major,
+                st.session_state.aql_minor,
+            )
+            report_data["sample_size"] = acre["critical"]["sample_size"]
+            report_data["sample_code"] = acre["critical"]["sample_code"]
+            # aql_info 供 PDF 展示完整抽样方案（样本量代码 + 各层 Ac/Re）
+            report_data["aql_info"] = {
+                "sample_code": acre["critical"]["sample_code"],
+                "critical_aql": st.session_state.aql_critical,
+                "major_aql": st.session_state.aql_major,
+                "minor_aql": st.session_state.aql_minor,
+                "critical_ac": acre["critical"]["ac"], "critical_re": acre["critical"]["re"],
+                "major_ac": acre["major"]["ac"], "major_re": acre["major"]["re"],
+                "minor_ac": acre["minor"]["ac"], "minor_re": acre["minor"]["re"],
+            }
+        else:
+            report_data["sample_size"] = "N/A"
+        report_data["inspection_date"] = datetime.now().strftime("%Y-%m-%d")
+
         pdf_bytes = generate_inspection_pdf(report_data, st.session_state.uploaded_files)
         # 存入 session_state，以便任何后续 rerun 都能持久显示下载按钮
         st.session_state.pdf_bytes = pdf_bytes
