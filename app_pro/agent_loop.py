@@ -37,49 +37,24 @@ logger = logging.getLogger(__name__)
 # ============================================================================
 
 _DEFAULT_SYSTEM_PROMPT = (
-    "你是一位拥有15年经验的外贸验货专家，精通ISO 2859-1/2抽样标准、"
-    "AQL质量标准（AQL 0.65/1.0/1.5/2.5/4.0/6.5），熟悉电子产品、纺织品、"
-    "机械配件、玩具等各类产品的国际质量标准（ISO、ASTM、GB、EN等）。\n\n"
-    "你的任务是：收到产品图片和基本信息后，像真正的验货员一样工作——"
-    "**先问清楚关键信息，再看图分析，最后给出专业结论**。\n\n"
-    "【工作流程】\n"
-    "1. 如果缺少订单数量、验货标准、工厂名称等关键信息，先主动追问用户，不要凭猜测出报告。\n"
-    "2. 如果图片模糊或角度不够，主动要求补拍特定角度。\n"
-    "3. 在出最终报告前，可以调用工具查询标准、历史记录、产品档案来辅助判断。\n"
-    "4. 综合所有信息，按输出格式给出结论。\n\n"
-    "【AQL 三层抽样标准】\n"
-    "- 致命缺陷（AQL 0.65）：安全风险、违法、危及生命 -- 任何数量均不合格（Ac=0）\n"
-    "- 主要缺陷（AQL 2.5）：功能失效、影响使用、关键尺寸偏差 -- 参照抽样表 Ac/Re\n"
-    "- 次要缺陷（AQL 4.0）：外观瑕疵、不影响功能、包装问题 -- 参照抽样表 Ac/Re\n\n"
-    "【输出格式】（最终结论时使用 JSON）\n"
-    '{\n'
-    '  "conclusion": "合格/不合格/有条件接受",\n'
-    '  "three_layer_result": {\n'
-    '    "critical": {"passed": true/false, "aql": "AQL X.X", "defect_count": 数字},\n'
-    '    "major": {"passed": true/false, "aql": "AQL X.X", "defect_count": 数字},\n'
-    '    "minor": {"passed": true/false, "aql": "AQL X.X", "defect_count": 数字}\n'
-    "  },\n"
-    '  "defects": [\n'
-    '    {\n'
-    '      "type": "划痕/变形/色差/功能异常/包装破损等",\n'
-    '      "quantity": 数字,\n'
-    '      "severity": "致命/主要/次要",\n'
-    '      "description": "详细描述（50字以内）",\n'
-    '      "image": "图1/图2/图3"\n'
-    "    }\n"
-    "  ],\n"
-    '  "recommendation": "处理建议（100字以内）",\n'
-    '  "confidence": 0.0-1.0\n'
-    "}\n\n"
-    "【注意】\n"
-    "- quantity 必须是整数，禁止'若干'、'多个'\n"
-    "- 如果信息严重不足，先追问，不要瞎判\n"
-    "- 工具调用结果仅供参考，最终以你的专业判断为准\n"
-    "- 保持对话友好、专业，有礼有据\n\n"
-    "【图片处理规则】\n"
-    "- 如果用户上传了图片，系统会自动先用 qwen-vl-plus 做视觉分析，把缺陷结果插入到对话中（以 [图片分析结果] 开头）。\n"
-    "- 一旦看到 [图片分析结果] 消息，**严禁**再问'请分享图片'或'我没看到图片'——图片已被系统读取。\n"
-    "- 直接基于该结果继续追问或出报告即可。"
+    "你是外贸验货专家，精通AQL抽样标准(ISO 2859-1)。\n\n"
+    "【任务】分析产品图片，识别缺陷，按AQL标准判定合格/不合格。\n\n"
+    "【AQL三层标准】\n"
+    "- 致命(AQL0.65):安全风险→Ac=0,发现即不合格\n"
+    "- 主要(AQL2.5):功能失效→按抽样表Ac/Re判定\n"
+    "- 次要(AQL4.0):外观瑕疵→按抽样表Ac/Re判定\n\n"
+    "【输出JSON格式】\n"
+    '{"conclusion":"合格/不合格/有条件接受",'
+    '"three_layer_result":{"critical":{"passed":bool,"aql":"AQL X.X","defect_count":N},'
+    '"major":{"passed":bool,"aql":"AQL X.X","defect_count":N},'
+    '"minor":{"passed":bool,"aql":"AQL X.X","defect_count":N}},'
+    '"defects":[{"type":"缺陷类型","quantity":N,"severity":"致命/主要/次要","description":"描述","image":"图N"}],'
+    '"recommendation":"建议","confidence":0.0-1.0}\n\n'
+    "【规则】\n"
+    "- quantity必须是整数\n"
+    "- 信息不足时先追问，勿猜测\n"
+    "- 已看到[图片分析结果]，勿再问图片\n"
+    "- 可直接出结论，不必反复调用工具"
 )
 
 
@@ -98,8 +73,8 @@ class AgentConfig:
     base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
     timeout_seconds: int = 120  # 视觉分析可能较慢，延长至 120 秒
     vision_model: str = "qwen-vl-plus"
-    reasoning_model: str = "qwen-max"
-    max_steps: int = 6
+    reasoning_model: str = "qwen-plus"  # qwen-max -> qwen-plus 提速（成本也降低）
+    max_steps: int = 4  # 6 -> 4，减少轮数（大部分验货 2-3 轮足够）
     max_vision_steps: int = 3
     system_prompt: str = _DEFAULT_SYSTEM_PROMPT
 
@@ -262,6 +237,66 @@ def _run_agent_fast(
     return "report", report, defects, image_labels
 
 
+def _run_agent_turbo(
+    config: AgentConfig,
+    context: AgentContext,
+) -> tuple[Literal["report"], dict, list[dict], list[str]] | tuple[Literal["error"], str, list, list]:
+    """
+    Turbo 模式：单次视觉分析 + 立即 AQL 判定，无任何 LLM 推理。
+
+    比 fast 模式更快：
+    - fast: 3 次视觉投票（15-45 秒）
+    - turbo: 1 次视觉分析（5-10 秒）
+
+    适用场景：图片清晰、缺陷明显、无需复杂推理的标准验货。
+    """
+    if not context.image_bytes_list:
+        return "error", "请先上传产品图片", [], []
+
+    # 单次视觉分析
+    ok, conclusion_or_error, defects, image_labels = analyze_images_vision(config, context)
+    if not ok:
+        return "error", f"图片分析失败：{conclusion_or_error}", [], []
+
+    # 基于真实 AQL 计算三层判定
+    if context.acre is None and context.order_quantity:
+        try:
+            context.acre = compute_three_layer_acre(
+                context.order_quantity,
+                context.aql_critical,
+                context.aql_major,
+                context.aql_minor,
+            )
+        except Exception:
+            pass
+
+    three_layer = {}
+    final_conclusion = conclusion_or_error
+    if context.acre:
+        three_layer, final_conclusion = judge_three_layer(defects, context.acre)
+
+    # 构建报告
+    report = {
+        "conclusion": final_conclusion,
+        "three_layer_result": three_layer,
+        "defects": [
+            {
+                "type": d.get("type", "未知"),
+                "quantity": int(d.get("quantity", 0)),
+                "severity": d.get("severity", "次要"),
+                "description": d.get("description", ""),
+                "image": d.get("image", image_labels[i] if i < len(image_labels) else f"图{i+1}"),
+            }
+            for i, d in enumerate(defects)
+        ],
+        "recommendation": _generate_recommendation(final_conclusion, defects),
+        "confidence": 0.75,  # turbo 模式置信度略低（单次分析）
+        "mode": "turbo",
+    }
+
+    return "report", report, defects, image_labels
+
+
 def _consensus_defects(
     rounds: list[list[dict]],
     vote_threshold: int = 2,
@@ -363,14 +398,17 @@ def run_agent(
     context: AgentContext,
     tools_schema: list[dict],
     tool_registry: dict[str, callable],
-    mode: Literal["intelligent", "fast"] = "intelligent",
+    mode: Literal["intelligent", "fast", "turbo"] = "intelligent",
 ) -> tuple[Literal["report"], dict, list, list] | tuple[Literal["ask"], str] | tuple[Literal["error"], str]:
     """
     Agent 主循环。
 
-    mode="fast": 跳过 Agent 推理，直接用视觉分析结果 + 确定性 AQL 规则返回报告。
-                  单次 API 调用，5~15 秒完成。
-    mode="intelligent": 完整 Agent 多轮推理（默认），支持工具调用和追问。
+    mode="turbo": 最快模式。单次视觉分析 + AQL 判定，无 LLM 推理。
+                   1 次 API 调用，5-10 秒完成。
+    mode="fast":  快速模式。3 次视觉投票 + AQL 判定，无 LLM 推理。
+                   3 次 API 调用，15-45 秒完成。
+    mode="intelligent": 智能模式（默认）。Agent 多轮推理 + 工具调用。
+                         支持追问，2-4 轮，30-90 秒完成。
 
     返回:
         ("report", result_dict)  -- 最终报告
@@ -380,6 +418,10 @@ def run_agent(
     # ===== 极速模式：单次视觉分析 + AQL 确定性规则，无需 Agent 推理 =====
     if mode == "fast":
         return _run_agent_fast(config, context)
+
+    # ===== Turbo 模式：视觉分析后直接出结论，跳过所有工具调用（最快） =====
+    if mode == "turbo":
+        return _run_agent_turbo(config, context)
 
     # ===== 深度模式（默认）：Agent 多轮推理 + 工具调用 =====
     # 图片预分析已在 app.py handle_user_input 中完成并注入到 messages。
@@ -440,8 +482,8 @@ def run_agent(
                 messages=messages,
                 tools=tools_schema,
                 tool_choice="auto",
-                max_tokens=1500,
-                temperature=0.3,
+                max_tokens=1200,  # 1500 -> 1200，减少生成时间
+                temperature=0.5,  # 0.3 -> 0.5，略微提高 creativity 换取更快响应
             )
         except openai.APITimeoutError:
             return "error", f"API 调用超时（{config.timeout_seconds}秒）", [], []
