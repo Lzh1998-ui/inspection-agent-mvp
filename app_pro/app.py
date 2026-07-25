@@ -329,7 +329,7 @@ def handle_user_input(user_input: str):
 
     config = AgentConfig(
         qwen_key=api_key,
-        timeout_seconds=60,
+        timeout_seconds=120,  # 视觉分析可能较慢，延长至 120 秒
         max_steps=6,
     )
 
@@ -677,7 +677,7 @@ def run_fast_mode():
         st.warning("请先上传产品图片")
         return
 
-    client, model_name = build_ai_client(qwen_key=api_key, timeout_seconds=60)
+    client, model_name = build_ai_client(qwen_key=api_key, timeout_seconds=120)
     if not client:
         st.error(model_name)
         return
