@@ -306,10 +306,11 @@ def _render_history_panel():
         try:
             from app_pro.tools import _get_supabase
             client = _get_supabase()
-        except Exception:
+        except Exception as e_init:
             client = None
+            init_err = str(e_init)
         if client is None:
-            st.warning("Supabase 未配置，无法加载历史")
+            st.warning(f"Supabase 未配置，无法加载历史。错误：{init_err if 'init_err' in dir() else '客户端初始化失败'}")
             return
 
         if st.session_state.get("_hist_rows") is None:
@@ -714,18 +715,20 @@ def _get_current_user_email() -> str | None:
     return st.session_state.get("user_email") or None
 
 
-def _save_report_to_supabase(report: dict):
+def _save_report_to_supabase(report: dict) -> tuple[bool, str]:
     """
     把验货报告写入 Supabase `inspection_reports` 表。
     供智能模式工具（search_defect_history / get_product_profile）查询真实历史。
     失败不阻断主流程（报告照常展示 + PDF 照常生成）。
+    返回: (success: bool, message: str)
     """
     try:
         from app_pro.tools import _get_supabase
         client = _get_supabase()
         if client is None:
-            logger.warning("[DB] Supabase 未配置，跳过报告入库")
-            return
+            msg = "Supabase 未配置（检查 Secrets）"
+            logger.warning("[DB] %s", msg)
+            return False, msg
 
         # 抽样方案（与 PDF 计算一致）
         sample_size = None
@@ -763,9 +766,13 @@ def _save_report_to_supabase(report: dict):
             "pdf_filename": st.session_state.get("pdf_filename"),
         }
         client.table("inspection_reports").insert(row).execute()
-        logger.info("[DB] 报告已入库: %s", row["product_name"])
+        msg = f"报告已入库: {row['product_name']}"
+        logger.info("[DB] %s", msg)
+        return True, msg
     except Exception as e:
-        logger.warning("[DB] 报告入库失败（不影响展示）: %s", e)
+        msg = str(e)
+        logger.warning("[DB] 报告入库失败（不影响展示）: %s", msg)
+        return False, msg
 
 
 # ============================================================================
@@ -819,8 +826,10 @@ def _render_final_report(report: dict):
 
     # ===== 报告入库（Supabase，供工具/历史查询）=====
     if not st.session_state.get("_report_saved", False):
-        _save_report_to_supabase(report)
-        st.session_state._report_saved = True
+        db_ok, db_msg = _save_report_to_supabase(report)
+        st.session_state._report_saved = db_ok
+        if not db_ok:
+            st.warning(f"⚠️ 报告未保存到历史：{db_msg}")
 
     # ===== PDF 自动生成 + 下载 =====
     # 报告生成后自动生成 PDF 并存入 session_state，下载按钮持久显示，无需额外点击
