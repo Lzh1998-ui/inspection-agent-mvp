@@ -96,7 +96,7 @@ class AgentConfig:
     deepseek_key: str | None = None
     openai_key: str | None = None
     base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-    timeout_seconds: int = 60
+    timeout_seconds: int = 120  # 视觉分析可能较慢，延长至 120 秒
     vision_model: str = "qwen-vl-plus"
     reasoning_model: str = "qwen-max"
     max_steps: int = 6
@@ -205,9 +205,18 @@ def _run_agent_fast(
         else:
             last_error = conclusion_or_error
             # 某轮失败不中断，继续投票
+            print(f"[VISION] 第 {round_idx+1}/{vote_rounds} 轮视觉分析失败: {conclusion_or_error}")
 
     if not all_rounds:
-        return "error", f"图片分析失败：{last_error or '未知错误'}", [], []
+        # 全部失败，返回更友好的错误提示
+        err_msg = last_error or "未知错误"
+        if "timeout" in err_msg.lower() or "timed out" in err_msg.lower():
+            err_msg = "视觉分析超时。可能原因：\n" \
+                      "1. 图片分辨率过高（建议单张 < 2MB）\n" \
+                      "2. 网络延迟（已自动重试 3 次）\n" \
+                      "3. 模型服务繁忙\n\n" \
+                      "建议：压缩图片后重试，或稍后再试。"
+        return "error", f"图片分析失败：{err_msg}", [], []
 
     # 投票法合并缺陷
     defects = _consensus_defects(all_rounds, vote_threshold=2)
@@ -611,15 +620,31 @@ def analyze_images_vision(
         img_url = f"data:image/jpeg;base64,{img_b64}"
         user_content.append({"type": "image_url", "image_url": {"url": img_url}})
 
-    try:
-        response = client.chat.completions.create(
-            model=config.vision_model,
-            messages=[{"role": "user", "content": user_content}],
-            max_tokens=1000,
-            temperature=0.3,
-        )
-    except Exception as e:
-        return False, f"视觉分析失败: {str(e)}", [], []
+    # 带重试的视觉分析（指数退避，最多 3 次）
+    max_retries = 3
+    last_error = None
+    for attempt in range(max_retries):
+        try:
+            response = client.chat.completions.create(
+                model=config.vision_model,
+                messages=[{"role": "user", "content": user_content}],
+                max_tokens=1000,
+                temperature=0.3,
+            )
+            break  # 成功则跳出重试循环
+        except Exception as e:
+            last_error = e
+            err_str = str(e).lower()
+            # 超时或连接错误才重试
+            if any(k in err_str for k in ["timeout", "timed out", "connection", "connect"]):
+                if attempt < max_retries - 1:
+                    import time
+                    wait = 2 ** attempt  # 1s, 2s, 4s
+                    time.sleep(wait)
+                    continue
+            return False, f"视觉分析失败: {str(e)}", [], []
+    else:
+        return False, f"视觉分析失败（重试{max_retries}次后）: {last_error}", [], []
 
     raw = response.choices[0].message.content or ""
     defects = []
