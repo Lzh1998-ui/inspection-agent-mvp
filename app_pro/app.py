@@ -142,7 +142,7 @@ def init_session_state():
         "final_report": None,
         "analysis_triggered": False,  # 防重复自动触发锁
         "trigger_signature": None,    # 上一次触发时的图片签名（去重 key）
-        "mode": "intelligent",  # "intelligent" | "fast"
+        "mode": "turbo",  # "turbo" | "fast" | "intelligent"
         "pdf_bytes": None,            # 已生成的 PDF 字节（持久化按钮用）
         "pdf_filename": None,         # 下载时的默认文件名
     }
@@ -198,19 +198,31 @@ def render_sidebar():
         st.markdown("**⚙️ 运行模式**")
         mode = st.segmented_control(
             "",
-            options=["🤖 智能模式", "⚡ 极速模式"],
-            default="🤖 智能模式" if st.session_state.mode == "intelligent" else "⚡ 极速模式",
+            options=["🚀 极速", "⚡ 快速", "🤖 智能"],
+            default={
+                "turbo": "🚀 极速",
+                "fast": "⚡ 快速",
+                "intelligent": "🤖 智能",
+            }.get(st.session_state.mode, "🚀 极速"),
             help=None,
         )
         if mode is None:
-            mode = "🤖 智能模式" if st.session_state.mode == "intelligent" else "⚡ 极速模式"
-        st.session_state.mode = "intelligent" if "智能" in mode else "fast"
+            mode = "🚀 极速"
+        # 模式映射
+        if "极速" in mode:
+            st.session_state.mode = "turbo"
+        elif "快速" in mode:
+            st.session_state.mode = "fast"
+        else:
+            st.session_state.mode = "intelligent"
 
         # 模式说明
-        if st.session_state.mode == "intelligent":
-            st.caption("🤖 Agent 多轮推理 + 工具调用，约 1~2 分钟")
+        if st.session_state.mode == "turbo":
+            st.caption("🚀 单次视觉 + AQL 判定，5-10 秒，最快")
+        elif st.session_state.mode == "fast":
+            st.caption("⚡ 3次投票 + AQL 判定，15-45 秒，平衡速度与准确性")
         else:
-            st.caption("⚡ 单次 API 调用，约 5~15 秒，保留完整报告")
+            st.caption("🤖 Agent 多轮推理 + 工具调用，1-2 分钟，适合复杂场景")
 
         st.divider()
 
@@ -250,24 +262,28 @@ def render_sidebar():
         with st.expander("ℹ️ 使用说明", expanded=False):
             st.markdown(
                 """
-            **⚡ 极速模式（推荐日常验货）**
-            - 单次 API 调用，约 5~15 秒出结果
-            - AI 视觉识别缺陷 + AQL 确定性规则判定
-            - 适合：标准产品、常规验货、快速筛查
+            **🚀 极速模式（推荐首选，最快）**
+            - 单次视觉分析 + AQL 判定，5-10 秒
+            - 无 LLM 推理，直接出结论
+            - 适合：标准产品、快速筛查、简单验货
+
+            **⚡ 快速模式（平衡之选）**
+            - 3次视觉投票 + AQL 判定，15-45 秒
+            - 减少单次分析偶然误差
+            - 适合：常规验货、缺陷明显产品
 
             **🤖 智能模式（适合复杂场景）**
-            - Agent 多轮推理 + 工具调用，约 1~2 分钟
-            - 自动查询历史记录、验货标准、产品档案
-            - 信息不足时会主动追问（补图/补充参数）
-            - 适合：新品首检、问题调查、深度分析
+            - Agent 多轮推理 + 工具调用，1-2 分钟
+            - 自动查历史、标准、档案，可追问
+            - 适合：新品首检、复杂问题、深度分析
 
             **通用操作：**
             1. 填写验货参数（产品名、订单数量、AQL 标准）
             2. 上传产品图片（JPG/PNG，单张 ≤ 5MB）
-            3. 选择模式，AI 自动分析并生成报告
+            3. 选择模式，点击按钮启动分析
             4. 支持导出 PDF 验货报告
 
-            **提示：** 极速模式费用更低、速度更快；智能模式更灵活、支持追问。
+            **提示：** 先试 🚀 极速模式，效果不好再试 ⚡ 快速或 🤖 智能模式。
             """
             )
 
@@ -330,7 +346,7 @@ def handle_user_input(user_input: str):
     config = AgentConfig(
         qwen_key=api_key,
         timeout_seconds=120,  # 视觉分析可能较慢，延长至 120 秒
-        max_steps=6,
+        max_steps=4,  # 4 轮足够收敛
     )
 
     # 初始化 / 更新 AgentContext
@@ -368,33 +384,29 @@ def handle_user_input(user_input: str):
     messages.append({"role": "user", "content": user_input})
 
     # 根据模式选择运行方式
-    mode = st.session_state.mode  # "intelligent" | "fast"
+    mode = st.session_state.mode  # "turbo" | "fast" | "intelligent"
 
     with st.chat_message("assistant"):
-        if mode == "fast":
-            # ===== 极速模式：单次 vl-plus 调用 + AQL 确定性规则，约 5~15 秒 =====
-            # 不调用 Agent 推理，避免双倍费用和 1~2 分钟延迟
+        if mode == "turbo":
+            # ===== 极速模式（Turbo）：单次视觉分析 + AQL 判定，5-10 秒 =====
             if not st.session_state.image_bytes_list:
-                st.warning("⚡ 极速模式需要上传产品图片，请先上传图片")
+                st.warning("🚀 极速模式需要上传产品图片，请先上传图片")
                 return
-
             ctx.image_bytes_list = st.session_state.image_bytes_list
-            with st.status("⚡ 极速分析中（单次API调用，约5~15秒）...", expanded=True) as vstatus:
-                # run_agent(mode="fast") 内部会调 analyze_images_vision，返回 4 值
+            with st.status("🚀 极速分析中（单次视觉分析，约5-10秒）...", expanded=True) as vstatus:
                 status, result, defects, img_labels = run_agent(
                     messages=messages,
                     config=config,
                     context=ctx,
                     tools_schema=TOOLS_SCHEMA,
                     tool_registry=TOOL_REGISTRY,
-                    mode="fast",
+                    mode="turbo",
                 )
                 if status == "report":
                     vstatus.update(
-                        label=f"✅ 分析完成！发现 {len(defects)} 项缺陷（qwen-vl-plus）",
+                        label=f"✅ 分析完成！发现 {len(defects)} 项缺陷（5-10秒极速）",
                         state="complete",
                     )
-                    # UI 直接展示缺陷
                     if defects:
                         st.markdown("**🔍 识别到的缺陷：**")
                         for d in defects[:10]:
@@ -406,17 +418,54 @@ def handle_user_input(user_input: str):
                     st.session_state.final_report = result
                     st.session_state.agent_finished = True
                     _render_final_report(result)
-                    return  # 极速模式不走下面的通用处理
+                    return
                 else:
                     vstatus.update(label=f"❌ 分析失败：{result}", state="error")
-                    st.error(f"极速分析失败：{result}")
+                    st.error(f"分析失败：{result}")
                     return
+
+        elif mode == "fast":
+            # ===== 快速模式：3次视觉投票 + AQL 判定，15-45 秒 =====
+            if not st.session_state.image_bytes_list:
+                st.warning("⚡ 快速模式需要上传产品图片，请先上传图片")
+                return
+            ctx.image_bytes_list = st.session_state.image_bytes_list
+            with st.status("⚡ 快速分析中（3次视觉投票，约15-45秒）...", expanded=True) as vstatus:
+                status, result, defects, img_labels = run_agent(
+                    messages=messages,
+                    config=config,
+                    context=ctx,
+                    tools_schema=TOOLS_SCHEMA,
+                    tool_registry=TOOL_REGISTRY,
+                    mode="fast",
+                )
+                if status == "report":
+                    vstatus.update(
+                        label=f"✅ 分析完成！发现 {len(defects)} 项缺陷（3次投票）",
+                        state="complete",
+                    )
+                    if defects:
+                        st.markdown("**🔍 识别到的缺陷：**")
+                        for d in defects[:10]:
+                            sev_icon = {"致命": "🔴", "主要": "🟡", "次要": "🟢"}.get(d.get("severity", "次要"), "⚪")
+                            st.markdown(
+                                f"- {sev_icon} **{d.get('type', '未知')}** × {d.get('quantity', 0)}件"
+                                f" — {d.get('description', '')}"
+                            )
+                    st.session_state.final_report = result
+                    st.session_state.agent_finished = True
+                    _render_final_report(result)
+                    return
+                else:
+                    vstatus.update(label=f"❌ 分析失败：{result}", state="error")
+                    st.error(f"分析失败：{result}")
+                    return
+
         else:
-            # ===== 智能模式：视觉分析（可见状态）+ Agent 推理 =====
+            # ===== 智能模式：视觉分析（可见状态）+ Agent 多轮推理 =====
             vision_done = False
             if st.session_state.image_bytes_list:
                 ctx.image_bytes_list = st.session_state.image_bytes_list
-                # 标记图片已预处理，避免 agent_loop 重复调用 vl-plus
                 ctx.images_preprocessed = True
                 with st.status("🔍 正在分析图片（qwen-vl-plus）...", expanded=True) as vstatus:
                     from app_pro.agent_loop import analyze_images_vision
@@ -427,7 +476,6 @@ def handle_user_input(user_input: str):
                             state="complete",
                         )
                         vision_done = True
-                        # 把视觉分析结果插入 messages
                         vision_summary = (
                             f"[视觉分析已完成]\n"
                             f"初步结论：{vresult}\n"
@@ -440,8 +488,6 @@ def handle_user_input(user_input: str):
                             )
                         vision_summary += "\n以上是 qwen-vl-plus 识别结果，请不要再问'请分享图片'。\n"
                         messages.append({"role": "user", "content": vision_summary})
-
-                        # 在 UI 上直接展示缺陷清单
                         if vdefects:
                             st.markdown("**🔍 视觉识别到的缺陷：**")
                             for d in vdefects[:10]:
@@ -887,10 +933,10 @@ def main():
                 "也可在下方输入框补充说明或提问。"
             )
 
-    else:
-        # ===== 极速模式 =====
-        st.markdown("### ⚡ 极速模式")
-        st.caption("单次视觉识别（多轮投票）+ AQL 确定性判定，约 15~45 秒出报告")
+    elif st.session_state.mode == "fast":
+        # ===== 快速模式 =====
+        st.markdown("### ⚡ 快速模式")
+        st.caption("3次视觉投票 + AQL 确定性判定，约 15-45 秒，平衡速度与准确性")
 
         col_start, col_reset = st.columns([4, 1])
         with col_start:
@@ -920,7 +966,42 @@ def main():
             st.session_state.pdf_filename = None
             handle_user_input("请分析我上传的图片，给出验货结论。")
         elif not st.session_state.final_report:
-            st.info("👋 填写左侧参数并上传图片后，点击「🔍 开始验货」启动极速分析。")
+            st.info("👋 填写左侧参数并上传图片后，点击「🔍 开始验货」启动快速分析。")
+
+    else:
+        # ===== 极速模式（Turbo）=====  # 默认模式
+        st.markdown("### 🚀 极速模式")
+        st.caption("单次视觉分析 + AQL 判定，5-10 秒完成，适合简单标准验货")
+
+        col_start, col_reset = st.columns([4, 1])
+        with col_start:
+            start_inspection = st.button(
+                "🚀 极速验货",
+                type="primary",
+                use_container_width=True,
+                help="点击后开始对已上传的图片进行验货",
+            )
+        with col_reset:
+            if st.button("🔄 重置", use_container_width=True, key="turbo_reset"):
+                for k in ["agent_messages", "tool_calls"]:
+                    st.session_state[k] = []
+                for k in ["agent_context", "final_report"]:
+                    st.session_state[k] = None
+                st.session_state.agent_finished = False
+                st.session_state.analysis_triggered = False
+                st.session_state.trigger_signature = None
+                st.session_state.pdf_bytes = None
+                st.session_state.pdf_filename = None
+                st.rerun()
+
+        if start_inspection:
+            st.session_state.analysis_triggered = False
+            st.session_state.agent_finished = False
+            st.session_state.pdf_bytes = None
+            st.session_state.pdf_filename = None
+            handle_user_input("请分析我上传的图片，给出验货结论。")
+        elif not st.session_state.final_report:
+            st.info("👋 填写左侧参数并上传图片后，点击「🚀 极速验货」启动分析（约5-10秒）。")
 
 
 if __name__ == "__main__":
