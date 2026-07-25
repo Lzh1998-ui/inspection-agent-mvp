@@ -259,9 +259,9 @@ def generate_inspection_pdf(report_data, uploaded_files):
     if "aql_info" in report_data:
         aql_info = report_data["aql_info"]
         info_data.append(["样本量代码", aql_info.get("sample_code", "N/A")])
-        info_data.append(["致命缺陷(AQL 1.0)", f"Ac={aql_info.get('critical_ac', 'N/A')}, Re={aql_info.get('critical_re', 'N/A')}"])
-        info_data.append(["主要缺陷(AQL 2.5)", f"Ac={aql_info.get('major_ac', 'N/A')}, Re={aql_info.get('major_re', 'N/A')}"])
-        info_data.append(["次要缺陷(AQL 4.0)", f"Ac={aql_info.get('minor_ac', 'N/A')}, Re={aql_info.get('minor_re', 'N/A')}"])
+        info_data.append([f"致命缺陷({aql_info.get('critical_aql', 'AQL 1.0')})", f"Ac={aql_info.get('critical_ac', 'N/A')}, Re={aql_info.get('critical_re', 'N/A')}"])
+        info_data.append([f"主要缺陷({aql_info.get('major_aql', 'AQL 2.5')})", f"Ac={aql_info.get('major_ac', 'N/A')}, Re={aql_info.get('major_re', 'N/A')}"])
+        info_data.append([f"次要缺陷({aql_info.get('minor_aql', 'AQL 4.0')})", f"Ac={aql_info.get('minor_ac', 'N/A')}, Re={aql_info.get('minor_re', 'N/A')}"])
 
     if FONT_AVAILABLE:
         info_table = Table(info_data, colWidths=[4 * cm, 10 * cm])
